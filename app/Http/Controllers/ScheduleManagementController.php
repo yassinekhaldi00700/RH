@@ -8,6 +8,12 @@ use Illuminate\Support\Facades\Session;
 
 class ScheduleManagementController extends Controller
 {
+    private function normalizeEmployeeCode($value)
+    {
+        $value = trim((string) $value);
+        return mb_substr($value, 0, 50);
+    }
+
     private function checkAdmin()
     {
         $user = Session::get('user');
@@ -522,11 +528,30 @@ class ScheduleManagementController extends Controller
     {
         if ($redirect = $this->checkAdmin()) return $redirect;
         
-        // Fetch users from users_schedules — its id is what user_workdays.user_id references
-        $users = DB::table('users_schedules')
-            ->select('id', 'employee_code', 'full_name')
-            ->orderBy('full_name')
-            ->get();
+        $biostarUsers = DB::connection('biostar_tna')->select(" 
+            SELECT u.NM as full_name, u.usrid as employee_code
+            FROM biostar2_ac.t_usr u
+            JOIN biostar2_ac.t_usrgr g ON u.usrgruid = g.usrgruid
+            WHERE g.usrgruid IN (
+                SELECT usrgruid
+                FROM biostar2_ac.t_usrgr
+                WHERE parentusrgruid = 1002
+            )
+            ORDER BY u.NM
+        ");
+
+        $users = collect($biostarUsers)
+            ->map(function ($user) {
+                return (object) [
+                    'employee_code' => $this->normalizeEmployeeCode($user->employee_code),
+                    'full_name' => trim((string) $user->full_name),
+                ];
+            })
+            ->filter(function ($user) {
+                return $user->employee_code !== '';
+            })
+            ->sortBy('full_name')
+            ->values();
         
         $weekdays = [
             0 => 'Lundi',
@@ -545,16 +570,32 @@ class ScheduleManagementController extends Controller
         if ($redirect = $this->checkAdmin()) return $redirect;
 
         $validated = $request->validate([
-            'user_id' => 'required|exists:users_schedules,id',
+            'employee_code' => 'required|string',
+            'full_name' => 'nullable|string|max:255',
             'workdays' => 'required|array|min:1',
             'workdays.*' => 'integer|between:0,6',
         ]);
 
-        DB::table('user_workdays')->where('user_id', $validated['user_id'])->delete();
+        $employeeCode = $this->normalizeEmployeeCode($validated['employee_code']);
+        $fullName = trim((string) ($validated['full_name'] ?? ''));
+
+        $userRecord = DB::table('users_schedules')->where('employee_code', $employeeCode)->first();
+        if (!$userRecord) {
+            $userId = DB::table('users_schedules')->insertGetId([
+                'employee_code' => $employeeCode,
+                'full_name' => $fullName !== '' ? $fullName : $employeeCode,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } else {
+            $userId = $userRecord->id;
+        }
+
+        DB::table('user_workdays')->where('user_id', $userId)->delete();
 
         foreach ($validated['workdays'] as $weekday) {
             DB::table('user_workdays')->insert([
-                'user_id' => $validated['user_id'],
+                'user_id' => $userId,
                 'weekday' => $weekday,
             ]);
         }

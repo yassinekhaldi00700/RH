@@ -10,6 +10,32 @@ use Illuminate\Support\Facades\Session;
 
 class AttendanceController extends Controller
 {
+    private const PUNCHLESS_SPECIAL_RECORD_TYPES = [
+        'Congé annuel',
+        'Congé de maladie',
+        'Ordre de mission',
+    ];
+
+    private function clearPunchesForSpecialRecord(array $record): array
+    {
+        if (!in_array(trim((string) ($record['Exception'] ?? '')), self::PUNCHLESS_SPECIAL_RECORD_TYPES, true)) {
+            return $record;
+        }
+
+        foreach (['Premier Entree', 'Sortie Final', 'e1', 's1', 'e2', 's2', 'e3', 's3', 'e4', 's4'] as $field) {
+            $record[$field] = null;
+        }
+        foreach ([
+            'Retard 1 ', 'Sortie en avance 1 ', 'Retard 2 ', 'Sortie en avance 2 ',
+            'la somme Sortie en avance', 'la somme Retard',
+            'la somme du Retards General', 'Heure Supp',
+        ] as $field) {
+            $record[$field] = '00:00:00';
+        }
+
+        return $record;
+    }
+
     private function isSimpleAttendanceCategory(?string $category): bool
     {
         return in_array($category, ['complex', 'vacataire_emadu'], true);
@@ -103,7 +129,17 @@ class AttendanceController extends Controller
                 'premier_entree', 'sortie_final', 'r1', 'sa1', 'r2', 'sa2',
                 'sum_sa', 'sum_r', 'sum_gen', 'hour_supp',
             ];
+
+            if (in_array($category, ['complex', 'vacataire_emadu'])) {
+                $allColumns = array_values(array_diff($allColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp']));
+            }
+
             $selectedColumns = $request->input('columns', session('selected_columns', $allColumns));
+
+            if (in_array($category, ['complex', 'vacataire_emadu'])) {
+                $selectedColumns = array_values(array_diff($selectedColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp']));
+            }
+
             session(['selected_columns' => $selectedColumns]);
 
             return view('welcome', [
@@ -796,15 +832,23 @@ class AttendanceController extends Controller
                  $attendanceData['processed_data'] = [];
             }
 
-            $allColumns = [
-    'date', 'nom', 'id_utilisateur', 'departement', 'status', 'exception',
-    'premier_entree', 'sortie_final', 'r1', 'sa1', 'r2', 'sa2',
-    'sum_sa', 'sum_r', 'sum_gen', 'hour_supp'
-    ];
+        $allColumns = [
+            'date', 'nom', 'id_utilisateur', 'departement', 'status', 'exception',
+            'premier_entree', 'sortie_final', 'r1', 'sa1', 'r2', 'sa2',
+            'sum_sa', 'sum_r', 'sum_gen', 'hour_supp'
+        ];
 
-    $selectedColumns = $request->input('columns', session('selected_columns', $allColumns));
-    
-    session(['selected_columns' => $selectedColumns]);
+        if (in_array($category, ['complex', 'vacataire_emadu'])) {
+            $allColumns = array_values(array_diff($allColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp']));
+        }
+
+        $selectedColumns = $request->input('columns', session('selected_columns', $allColumns));
+        
+        if (in_array($category, ['complex', 'vacataire_emadu'])) {
+            $selectedColumns = array_values(array_diff($selectedColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp']));
+        }
+
+        session(['selected_columns' => $selectedColumns]);
         
         return view('welcome', [
         'attendanceData' => $jsonOutput,
@@ -842,6 +886,25 @@ class AttendanceController extends Controller
                     'date', 'nom', 'id_utilisateur', 'departement', 'status', 'exception',
                     'premier_entree', 'sortie_final', 'sum_gen',
                 ],
+            ]);
+        }
+
+        $category = $validated['category'] ?? null;
+        if (in_array($category, ['complex', 'vacataire_emadu'])) {
+            $allowedColumns = [
+                'date', 'nom', 'id_utilisateur', 'departement', 'status', 'exception',
+                'premier_entree', 'sortie_final', 'sum_gen',
+                'e1', 's1', 'e2', 's2', 'e3', 's3', 'e4', 's4'
+            ];
+            $reqColumns = $request->input('columns');
+            if (empty($reqColumns)) {
+                $reqColumns = $allowedColumns;
+            } else {
+                $reqColumns = array_values(array_intersect($reqColumns, $allowedColumns));
+            }
+            $request->merge([
+                'type' => 'selected',
+                'columns' => $reqColumns
             ]);
         }
         
@@ -1086,7 +1149,7 @@ class AttendanceController extends Controller
         return array_map(function($record) use ($selectedColumns, $columnMapping) {
             $filteredRecord = [];
             foreach ($selectedColumns as $column) {
-                if (isset($columnMapping[$column]) && isset($record[$columnMapping[$column]])) {
+                if (isset($columnMapping[$column]) && array_key_exists($columnMapping[$column], $record)) {
                     $filteredRecord[$columnMapping[$column]] = $record[$columnMapping[$column]];
                 }
             }
@@ -1171,6 +1234,47 @@ public function logout()
     Session::flush();
     return redirect('/login');
 }
+
+public function showChangePasswordForm()
+{
+    $user = Session::get('user');
+    if (!$user) {
+        return redirect()->route('login')->with('error', 'Veuillez vous connecter');
+    }
+
+    return view('change-password');
+}
+
+public function changePassword(Request $request)
+{
+    $sessionUser = Session::get('user');
+    if (!$sessionUser) {
+        return redirect()->route('login')->with('error', 'Veuillez vous connecter');
+    }
+
+    $validated = $request->validate([
+        'current_password' => 'required|string',
+        'password' => 'required|string|min:6|confirmed',
+    ]);
+
+    $user = DB::table('users')->where('id', $sessionUser->id)->first();
+    if (!$user || !password_verify($validated['current_password'], $user->password)) {
+        return back()
+            ->withErrors(['current_password' => 'Le mot de passe actuel est incorrect.'])
+            ->withInput();
+    }
+
+    DB::table('users')->where('id', $user->id)->update([
+        'password' => bcrypt($validated['password']),
+        'updated_at' => now(),
+    ]);
+
+    $freshUser = DB::table('users')->where('id', $user->id)->first();
+    Session::put('user', $freshUser);
+
+    return redirect()->route('change.password')->with('success', 'Mot de passe modifie avec succes.');
+}
+
 public function showLoginForm()
 {
     
@@ -1211,11 +1315,24 @@ public function add_session()
 
         $userDroit = $user->droit ?? 1;
 
+        $category = null;
+        if ($userDroit == 1) {
+            $category = 'personnel';
+        } elseif ($userDroit == 2) {
+            $category = 'doctorants';
+        } elseif ($userDroit == 3) {
+            $category = 'complex';
+        }
+
         $allColumns = [
             'date', 'nom', 'id_utilisateur', 'departement', 'status', 'exception',
             'premier_entree', 'sortie_final', 'r1', 'sa1', 'r2', 'sa2',
             'sum_sa', 'sum_r', 'sum_gen', 'hour_supp'
         ];
+
+        if (in_array($category, ['complex', 'vacataire_emadu'])) {
+            $allColumns = array_values(array_diff($allColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp']));
+        }
 
         // Load persons from biostar DB based on user category
         $persons = $this->loadPersonsByDroit($userDroit);
@@ -1224,6 +1341,7 @@ public function add_session()
             'selectedColumns' => $allColumns,
             'userDroit' => $userDroit,
             'persons' => $persons,
+            'category' => $category,
         ]);
     }
 
@@ -1770,7 +1888,7 @@ public function downloadCumulPersonnel(Request $request)
         foreach ($rows as $row) {
             $record = json_decode($row->row_json, true);
             if ($record) {
-                $processedData[] = $record;
+                $processedData[] = $this->clearPunchesForSpecialRecord($record);
             }
         }
 

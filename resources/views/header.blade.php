@@ -7,7 +7,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <meta name="description" content="">
-    <meta name="author" content="">
+    <meta name="author" conform-controltent="">
 
     <title>gestion de présence</title>
 
@@ -200,7 +200,7 @@
             border-radius: var(--radius);
             font-size: 0.9rem;
             transition: var(--transition);
-            background: var(--white);
+            e);
         }
 
         .form-control:focus {
@@ -681,6 +681,11 @@
         <div class="dropdown-menu dropdown-menu-right shadow animated--grow-in"
             aria-labelledby="userDropdown">
             
+            <div class="dropdown-divider"></div>
+            <a href="{{ route('change.password') }}" class="dropdown-item">
+                <i class="fas fa-key fa-sm fa-fw mr-2 text-gray-400"></i>
+                Changer mot de passe
+            </a>
             <div class="dropdown-divider"></div>
             <a href="{{ route('logout') }}" class=" dropdown-item">
     Déconnexion

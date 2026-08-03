@@ -228,7 +228,7 @@
                         Métriques
                     </h4>
                     <div class="checkbox-group">
-                        <div class="elegant-checkbox">
+                        <div class="elegant-checkbox special-category-hide" style="{{ in_array($category ?? '', ['complex', 'vacataire_emadu']) ? 'display: none;' : '' }}">
                             <input type="checkbox" name="columns[]" id="col-r1" value="r1" {{ in_array('r1', $selectedColumns ?? []) ? 'checked' : '' }}>
                             <label for="col-r1">
                                 <span class="checkmark"></span>
@@ -236,7 +236,7 @@
                                 Retard 1
                             </label>
                         </div>
-                        <div class="elegant-checkbox">
+                        <div class="elegant-checkbox special-category-hide" style="{{ in_array($category ?? '', ['complex', 'vacataire_emadu']) ? 'display: none;' : '' }}">
                             <input type="checkbox" name="columns[]" id="col-sa1" value="sa1" {{ in_array('sa1', $selectedColumns ?? []) ? 'checked' : '' }}>
                             <label for="col-sa1">
                                 <span class="checkmark"></span>
@@ -244,7 +244,7 @@
                                 Sortie Avancée 1
                             </label>
                         </div>
-                        <div class="elegant-checkbox">
+                        <div class="elegant-checkbox special-category-hide" style="{{ in_array($category ?? '', ['complex', 'vacataire_emadu']) ? 'display: none;' : '' }}">
                             <input type="checkbox" name="columns[]" id="col-r2" value="r2" {{ in_array('r2', $selectedColumns ?? []) ? 'checked' : '' }}>
                             <label for="col-r2">
                                 <span class="checkmark"></span>
@@ -252,7 +252,7 @@
                                 Retard 2
                             </label>
                         </div>
-                        <div class="elegant-checkbox">
+                        <div class="elegant-checkbox special-category-hide" style="{{ in_array($category ?? '', ['complex', 'vacataire_emadu']) ? 'display: none;' : '' }}">
                             <input type="checkbox" name="columns[]" id="col-sa2" value="sa2" {{ in_array('sa2', $selectedColumns ?? []) ? 'checked' : '' }}>
                             <label for="col-sa2">
                                 <span class="checkmark"></span>
@@ -260,7 +260,7 @@
                                 Sortie Avancée 2
                             </label>
                         </div>
-                        <div class="elegant-checkbox">
+                        <div class="elegant-checkbox special-category-hide" style="{{ in_array($category ?? '', ['complex', 'vacataire_emadu']) ? 'display: none;' : '' }}">
                             <input type="checkbox" name="columns[]" id="col-sum_sa" value="sum_sa" {{ in_array('sum_sa', $selectedColumns ?? []) ? 'checked' : '' }}>
                             <label for="col-sum_sa">
                                 <span class="checkmark"></span>
@@ -268,7 +268,7 @@
                                 Total SA
                             </label>
                         </div>
-                        <div class="elegant-checkbox">
+                        <div class="elegant-checkbox special-category-hide" style="{{ in_array($category ?? '', ['complex', 'vacataire_emadu']) ? 'display: none;' : '' }}">
                             <input type="checkbox" name="columns[]" id="col-sum_r" value="sum_r" {{ in_array('sum_r', $selectedColumns ?? []) ? 'checked' : '' }}>
                             <label for="col-sum_r">
                                 <span class="checkmark"></span>
@@ -284,7 +284,7 @@
                                 Total Général
                             </label>
                         </div>
-                        <div class="elegant-checkbox">
+                        <div class="elegant-checkbox special-category-hide" style="{{ in_array($category ?? '', ['complex', 'vacataire_emadu']) ? 'display: none;' : '' }}">
                             <input type="checkbox" name="columns[]" id="col-hour_supp" value="hour_supp" {{ in_array('hour_supp', $selectedColumns ?? []) ? 'checked' : '' }}>
                             <label for="col-hour_supp">
                                 <span class="checkmark"></span>
@@ -404,7 +404,7 @@
                 <div class="export-section">
                     <h4><i class="fas fa-chart-line text-info"></i> Rapports</h4>
                     <div class="export-buttons">
-                        <button id="download-cumul" class="btn btn-info elegant-btn">
+                        <button id="download-cumul" class="btn btn-info elegant-btn" style="{{ in_array($category ?? '', ['complex', 'vacataire_emadu']) ? 'display: none;' : '' }}">
                             <i class="fas fa-chart-bar"></i>
                             Rapport Cumulatif
                         </button>
@@ -631,22 +631,38 @@
         $select.trigger('change.select2');
     }
 
+    function handleCategoryChange(category) {
+        if (category === 'complex' || category === 'vacataire_emadu') {
+            $('.special-category-hide').hide();
+            $('.special-category-hide input[type="checkbox"]').prop('checked', false);
+            $('#download-cumul').hide();
+        } else {
+            $('.special-category-hide').show();
+            $('#download-cumul').show();
+        }
+    }
+
+    // Call initial category display logic
+    handleCategoryChange($('#category').val() || 'personnel');
+
     // Category change handler
     $('#category').on('change', function() {
+        var category = $(this).val();
         loadGroups();
-        updatePersonDropdown($(this).val());
+        updatePersonDropdown(category);
+        handleCategoryChange(category);
     });
 
     // Group change handler - persons are pre-loaded by category
 
     // Column selection handlers
     $('#select-all').on('click', function() {
-        $('input[name="columns[]"]').prop('checked', true);
+        $('input[name="columns[]"]:visible').prop('checked', true);
     });
 
     $('#select-essential').on('click', function() {
         $('input[name="columns[]"]').prop('checked', false);
-        $('#col-date, #col-nom, #col-id_utilisateur, #col-departement, #col-status, #col-premier_entree, #col-sortie_final').prop('checked', true);
+        $('#col-date, #col-nom, #col-id_utilisateur, #col-departement, #col-status, #col-premier_entree, #col-sortie_final').filter(':visible').prop('checked', true);
     });
 
     // Show loading spinner on form submit (only after validation passes)
@@ -728,7 +744,8 @@
             params.category = exportCategory;
             params.columns = [
                 'date', 'nom', 'id_utilisateur', 'departement', 'status', 'exception',
-                'premier_entree', 'sortie_final', 'sum_gen'
+                'premier_entree', 'sortie_final', 'sum_gen',
+                'e1', 's1', 'e2', 's2', 'e3', 's3', 'e4', 's4'
             ];
             var url = '/export-excel?' + $.param(params) + '&format=excel&type=selected';
         } else {

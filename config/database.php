@@ -45,6 +45,28 @@ return [
     'collation' => 'utf8mb4_unicode_ci',
     'prefix' => '',
 ],
+'biostar2_ac' => [
+    'driver' => 'mysql',
+    'host' => '172.16.80.129',
+    'port' => '3312',
+    'database' => 'biostar2_ac',
+    'username' => 'rhapp',
+    'password' => 'Rh@@pP25',
+    'charset' => 'utf8mb4',
+    'collation' => 'utf8mb4_unicode_ci',
+    'prefix' => '',
+],
+'biostar2_ac' => [
+    'driver' => 'mysql',
+    'host' => '172.16.80.129',
+    'port' => '3312',
+    'database' => 'biostar2_ac',
+    'username' => 'rhapp',
+    'password' => 'Rh@@pP25',
+    'charset' => 'utf8mb4',
+    'collation' => 'utf8mb4_unicode_ci',
+    'prefix' => '',
+],
 
 'biostar_tna' => [
     'driver' => 'mysql',

@@ -35,6 +35,8 @@ Route::post('/register', [AttendanceController::class, 'register']);
 Route::middleware(['checklogin'])->group(function () {
   
     Route::get('/', [AttendanceController::class, 'add_session'])->name('add_session');
+    Route::get('/change-password', [AttendanceController::class, 'showChangePasswordForm'])->name('change.password');
+    Route::post('/change-password', [AttendanceController::class, 'changePassword'])->name('change.password.update');
     
     // Admin Routes (protected by checklogin middleware)
     Route::prefix('admin')->name('admin.')->group(function () {
@@ -109,4 +111,3 @@ Route::middleware(['checklogin'])->group(function () {
     });
     
 });
-

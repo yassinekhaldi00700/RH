@@ -300,6 +300,15 @@ def initialize_from_database():
 ENTRY_DEVICES = ['546271448', '546271459', '546271451', '546271441', '546271439', '546271457', 'PUNCH_TYPE_BREAK_END']
 EXIT_DEVICES = ['546271450', '546271456', '546271446', '546271465', '546271455', '546271449', 'PUNCH_TYPE_BREAK_START']
 
+# These leave types keep their attendance row, but must not show punch times or
+# contribute to delay/attendance totals.
+EXCLUDED_SPECIAL_RECORD_TYPES = {
+    'Congé annuel',
+    'Congé de maladie',
+    'Ordre de mission',
+    'Congé de maternité',
+}
+
 def get_user_schedule(user_id, date_obj=None):
     user_id_str = str(user_id)
     
@@ -643,7 +652,13 @@ def process_attendance_data(data):
     for (date, name, user_id, department), group in grouped_data:
         date_only = date.date() if hasattr(date, 'date') else date
         date_str = date_only.strftime('%Y-%m-%d')
-        
+
+        record_types = group['record_type'].unique() if 'record_type' in group.columns else []
+        special_record_types = [rt for rt in record_types
+                              if rt not in ["Original", "Modified"]
+                              and rt is not None
+                              and pd.notna(rt)]
+
         # Check for public holiday first
         if date_str in PUBLIC_HOLIDAYS:
             exception = get_public_holiday_name(date_str)
@@ -676,11 +691,6 @@ def process_attendance_data(data):
 
         attendance_record[user_id].add(date)
         
-        record_types = group['record_type'].unique() if 'record_type' in group.columns else []
-        special_record_types = [rt for rt in record_types 
-                              if rt not in ["Original", "Modified"] 
-                              and rt is not None 
-                              and pd.notna(rt)]
         special_record_type = special_record_types[0] if special_record_types else None
         
         in_times = group[group['Type'] == 'In']['Time'].tolist()
@@ -738,7 +748,26 @@ def process_attendance_data(data):
         # Get user-specific schedule
         user_schedule = get_user_schedule(user_id, date)
         
-        if special_record_type:
+        if special_record_type and str(special_record_type).strip() in EXCLUDED_SPECIAL_RECORD_TYPES:
+            # Keep the leave row, but remove all pointages and neutralize every
+            # attendance calculation for the selected leave types.
+            status = "partir"
+            exception = special_record_type
+            premier_entrie = None
+            sortie_final = None
+            for i in range(1, 5):
+                entries[f'e{i}'] = None
+                exits[f's{i}'] = None
+            diff_premier_entrie = 0
+            diff_pause_sortie = 0
+            diff_entrer_apres_pause = 0
+            diff_sortie_final = 0
+            sum_sortie_en_avance = 0
+            sum_retard = 0
+            sum_retard_general = 0
+            heure_supp = "00:00:00"
+
+        elif special_record_type:
             # Convert the times to strings for comparison
             premier_entry_str = premier_entrie.strftime('%H:%M:%S') if premier_entrie else None
             sortie_final_str = sortie_final.strftime('%H:%M:%S') if sortie_final else None
