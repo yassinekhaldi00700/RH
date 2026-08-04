@@ -307,6 +307,7 @@ EXCLUDED_SPECIAL_RECORD_TYPES = {
     'Congé de maladie',
     'Ordre de mission',
     'Congé de maternité',
+    'Congé sans solde',
 }
 
 def get_user_schedule(user_id, date_obj=None):
@@ -918,9 +919,9 @@ def process_attendance_data(data):
                 sum_sortie_en_avance = diff_pause_sortie + diff_sortie_final
                 sum_retard = diff_premier_entrie + diff_entrer_apres_pause
                 sum_retard_general = sum_retard + sum_sortie_en_avance
-                if sum_retard_general < 0:
+                if sum_retard_general < 1:
                     sum_retard_general = 0
-            
+
                 all_entries = [entries[f'e{i}'] for i in range(1, 5) if entries[f'e{i}']]
                 all_exits = [exits[f's{i}'] for i in range(1, 5) if exits[f's{i}']]
                 heure_supp = calculate_heure_supp(all_entries, all_exits, user_schedule)
@@ -1072,7 +1073,7 @@ def process_attendance_data(data):
             sum_sortie_en_avance = diff_pause_sortie + diff_sortie_final
             sum_retard = diff_premier_entrie + diff_entrer_apres_pause
             sum_retard_general = sum_retard + sum_sortie_en_avance
-            if sum_retard_general < 0:
+            if sum_retard_general < 1:
                 sum_retard_general = 0
 
 
