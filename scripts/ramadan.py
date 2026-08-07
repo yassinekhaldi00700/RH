@@ -308,6 +308,12 @@ EXCLUDED_SPECIAL_RECORD_TYPES = {
     'Ordre de mission',
     'Congé de maternité',
     'Congé sans solde',
+    'Congé de décès',
+    'Congé de mariage',
+    'Congé de circoncision',
+    'Opération chirurgicale',
+
+
 }
 
 def get_user_schedule(user_id, date_obj=None):
