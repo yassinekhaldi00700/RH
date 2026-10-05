@@ -90,6 +90,14 @@ Route::middleware(['checklogin'])->group(function () {
         Route::put('/user-day-schedules/{id}', [ScheduleManagementController::class, 'updateUserDaySchedule'])->name('user-day-schedules.update');
         Route::delete('/user-day-schedules/{id}', [ScheduleManagementController::class, 'deleteUserDaySchedule'])->name('user-day-schedules.delete');
 
+        // User Schedule Periods (date-range overrides)
+        Route::get('/user-schedule-periods', [ScheduleManagementController::class, 'userSchedulePeriods'])->name('user-schedule-periods');
+        Route::get('/user-schedule-periods/create', [ScheduleManagementController::class, 'createUserSchedulePeriod'])->name('user-schedule-periods.create');
+        Route::post('/user-schedule-periods', [ScheduleManagementController::class, 'storeUserSchedulePeriod'])->name('user-schedule-periods.store');
+        Route::get('/user-schedule-periods/{id}/edit', [ScheduleManagementController::class, 'editUserSchedulePeriod'])->name('user-schedule-periods.edit');
+        Route::put('/user-schedule-periods/{id}', [ScheduleManagementController::class, 'updateUserSchedulePeriod'])->name('user-schedule-periods.update');
+        Route::delete('/user-schedule-periods/{id}', [ScheduleManagementController::class, 'deleteUserSchedulePeriod'])->name('user-schedule-periods.delete');
+
         // Ramadan Periods
         Route::get('/ramadan-periods', [ScheduleManagementController::class, 'ramadanPeriods'])->name('ramadan-periods');
         Route::get('/ramadan-periods/create', [ScheduleManagementController::class, 'createRamadanPeriod'])->name('ramadan-periods.create');

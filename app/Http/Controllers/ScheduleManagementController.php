@@ -968,6 +968,148 @@ class ScheduleManagementController extends Controller
             ->with('success', 'Horaire journalier supprimé avec succès');
     }
 
+    // ==================== USER SCHEDULE PERIODS (date-range overrides) ====================
+
+    public function userSchedulePeriods()
+    {
+        if ($redirect = $this->checkAdmin()) return $redirect;
+
+        $periods = DB::table('user_schedule_periods as usp')
+            ->join('schedules as s', 'usp.schedule_id', '=', 's.id')
+            ->select('usp.*', 's.name as schedule_name')
+            ->orderBy('usp.start_date', 'desc')
+            ->get();
+
+        return view('admin.user-schedule-periods.index', compact('periods'));
+    }
+
+    public function createUserSchedulePeriod()
+    {
+        if ($redirect = $this->checkAdmin()) return $redirect;
+
+        $schedules = DB::table('schedules')->orderBy('name')->get();
+        $users = DB::connection('biostar_tna')->select("
+            SELECT u.NM as full_name, u.usrid as employee_code
+            FROM biostar2_ac.t_usr u
+            JOIN biostar2_ac.t_usrgr g ON u.usrgruid = g.usrgruid
+            WHERE g.usrgruid IN (
+                SELECT usrgruid
+                FROM biostar2_ac.t_usrgr
+                WHERE parentusrgruid = 1002
+            )
+            ORDER BY u.NM
+        ");
+
+        return view('admin.user-schedule-periods.create', compact('schedules', 'users'));
+    }
+
+    public function storeUserSchedulePeriod(Request $request)
+    {
+        if ($redirect = $this->checkAdmin()) return $redirect;
+
+        $validated = $request->validate([
+            'employee_code' => 'required|string|max:255',
+            'full_name'     => 'required|string|max:255',
+            'schedule_id'   => 'required|exists:schedules,id',
+            'start_date'    => 'required|date',
+            'end_date'      => 'required|date|after_or_equal:start_date',
+        ]);
+
+        $overlap = DB::table('user_schedule_periods')
+            ->where('employee_code', $validated['employee_code'])
+            ->where('start_date', '<=', $validated['end_date'])
+            ->where('end_date', '>=', $validated['start_date'])
+            ->exists();
+
+        if ($overlap) {
+            return back()->withErrors([
+                'start_date' => 'Cet employé a déjà une période qui chevauche ces dates.'
+            ])->withInput();
+        }
+
+        DB::table('user_schedule_periods')->insert([
+            'employee_code' => $validated['employee_code'],
+            'full_name'     => $validated['full_name'],
+            'schedule_id'   => $validated['schedule_id'],
+            'start_date'    => $validated['start_date'],
+            'end_date'      => $validated['end_date'],
+            'created_at'    => now(),
+            'updated_at'    => now(),
+        ]);
+
+        return redirect()->route('admin.user-schedule-periods')->with('success', 'Période créée avec succès');
+    }
+
+    public function editUserSchedulePeriod($id)
+    {
+        if ($redirect = $this->checkAdmin()) return $redirect;
+
+        $period = DB::table('user_schedule_periods')->where('id', $id)->first();
+        if (!$period) {
+            return redirect()->route('admin.user-schedule-periods')->with('error', 'Période non trouvée');
+        }
+
+        $schedules = DB::table('schedules')->orderBy('name')->get();
+        $users = DB::connection('biostar_tna')->select("
+            SELECT u.NM as full_name, u.usrid as employee_code
+            FROM biostar2_ac.t_usr u
+            JOIN biostar2_ac.t_usrgr g ON u.usrgruid = g.usrgruid
+            WHERE g.usrgruid IN (
+                SELECT usrgruid
+                FROM biostar2_ac.t_usrgr
+                WHERE parentusrgruid = 1002
+            )
+            ORDER BY u.NM
+        ");
+
+        return view('admin.user-schedule-periods.edit', compact('period', 'schedules', 'users'));
+    }
+
+    public function updateUserSchedulePeriod(Request $request, $id)
+    {
+        if ($redirect = $this->checkAdmin()) return $redirect;
+
+        $validated = $request->validate([
+            'employee_code' => 'required|string|max:255',
+            'full_name'     => 'required|string|max:255',
+            'schedule_id'   => 'required|exists:schedules,id',
+            'start_date'    => 'required|date',
+            'end_date'      => 'required|date|after_or_equal:start_date',
+        ]);
+
+        $overlap = DB::table('user_schedule_periods')
+            ->where('employee_code', $validated['employee_code'])
+            ->where('start_date', '<=', $validated['end_date'])
+            ->where('end_date', '>=', $validated['start_date'])
+            ->where('id', '!=', $id)
+            ->exists();
+
+        if ($overlap) {
+            return back()->withErrors([
+                'start_date' => 'Cet employé a déjà une période qui chevauche ces dates.'
+            ])->withInput();
+        }
+
+        DB::table('user_schedule_periods')->where('id', $id)->update([
+            'employee_code' => $validated['employee_code'],
+            'full_name'     => $validated['full_name'],
+            'schedule_id'   => $validated['schedule_id'],
+            'start_date'    => $validated['start_date'],
+            'end_date'      => $validated['end_date'],
+            'updated_at'    => now(),
+        ]);
+
+        return redirect()->route('admin.user-schedule-periods')->with('success', 'Période mise à jour avec succès');
+    }
+
+    public function deleteUserSchedulePeriod($id)
+    {
+        if ($redirect = $this->checkAdmin()) return $redirect;
+
+        DB::table('user_schedule_periods')->where('id', $id)->delete();
+        return redirect()->route('admin.user-schedule-periods')->with('success', 'Période supprimée avec succès');
+    }
+
     // ==================== ROLES & DROITS ====================
 
     public function roles()
@@ -1055,6 +1197,7 @@ class ScheduleManagementController extends Controller
             'public_holidays'  => DB::table('public_holidays')->count(),
             'ramadan_periods'  => DB::table('ramadan')->count(),
             'day_schedules'    => DB::table('user_day_schedules')->count(),
+            'schedule_periods' => DB::table('user_schedule_periods')->count(),
             'users'            => DB::table('users')->count(),
         ];
         

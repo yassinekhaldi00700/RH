@@ -97,8 +97,10 @@ def get_date_range(start_date, end_date):
     return date_list
 
 def is_weekend(date_obj, user_id):
-    """Check if date is a weekend for the user"""
-    allowed_days = USER_WORKDAYS.get(str(user_id), [0, 1, 2, 3, 4])
+    """Check if date is a weekend for the user.
+    Complex/24h employees have no weekly rest day by default (open schedule),
+    so unless explicitly configured otherwise, every day counts as a workday."""
+    allowed_days = USER_WORKDAYS.get(str(user_id), [0, 1, 2, 3, 4, 5, 6])
     return date_obj.weekday() not in allowed_days
 
 def process_attendance_data(data):
@@ -168,36 +170,7 @@ def process_attendance_data(data):
     for (date, name, user_id, department), group in grouped_data:
         date_only = date.date() if hasattr(date, 'date') else date
         date_str = date_only.strftime('%Y-%m-%d')
-        
-        # Check for public holiday first
-        if date_str in PUBLIC_HOLIDAYS:
-            exception = get_public_holiday_name(date_str)
-            status = "Absent"
-            record = {
-                'Date': date.strftime('%Y-%m-%d'),
-                'Nom': name,
-                'ID utilisateur': user_id,
-                'Département': department,
-                'Status': status,
-                'Exception': exception,
-                'Premier Entree': None,
-                'Sortie Final': None,
-                'Retard 1 ': "00:00:00",
-                'Sortie en avance 1 ': "00:00:00",
-                'Retard 2 ': "00:00:00",
-                'Sortie en avance 2 ': "00:00:00",
-                'la somme Sortie en avance': "00:00:00",
-                'la somme Retard': "00:00:00",
-                'la somme du Retards General': "00:00:00",
-                'Heure Supp': "00:00:00",
-            }
-            
-            for i in range(1, 5):
-                record[f'e{i}'] = None
-                record[f's{i}'] = None
-            processed_data.append(record)
-            attendance_record[user_id].add(date)
-            continue  
+        is_holiday = date_str in PUBLIC_HOLIDAYS
 
         attendance_record[user_id].add(date)
         
@@ -278,10 +251,11 @@ def process_attendance_data(data):
                 all_exits = [exits[f's{i}'] for i in range(1, 5) if exits[f's{i}']]
                 temps_travaille = calculate_total_time_worked(all_entries, all_exits)
         
-        elif is_weekend_day:
-            # Even on weekends, if there's pointage (attendance), calculate time worked
-            status = "Pas de travail"
-            exception = ""
+        elif is_weekend_day or is_holiday:
+            # Even on weekends and public holidays, if there's pointage (attendance),
+            # calculate time worked normally instead of marking the day absent
+            status = "Pas de travail" if not is_holiday else "present"
+            exception = get_public_holiday_name(date_str) if is_holiday else ""
             if status == "anomalie":
                 temps_travaille = 0
             else:

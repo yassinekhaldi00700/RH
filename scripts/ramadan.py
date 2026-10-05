@@ -27,6 +27,10 @@ USER_DAY_SCHEDULES = {}
 USER_DAY_SCHEDULES_RAMADAN = {}
 PUBLIC_HOLIDAYS = {}
 RAMADAN_PERIODS = []
+# All schedules keyed by id, regardless of ramadan flag (used by USER_SCHEDULE_PERIODS)
+SCHEDULES_BY_ID = {}
+# Per-employee date-range schedule overrides: {employee_code: [(start_date, end_date, schedule_id), ...]}
+USER_SCHEDULE_PERIODS = {}
 
 def get_db_connection():
     """Create and return a database connection"""
@@ -71,7 +75,7 @@ def is_ramadan_date(date_obj):
 
 def load_schedules_from_db():
     """Load all schedules from the database (both normal and Ramadan)"""
-    global DEFAULT_SCHEDULES, DEFAULT_SCHEDULES_RAMADAN
+    global DEFAULT_SCHEDULES, DEFAULT_SCHEDULES_RAMADAN, SCHEDULES_BY_ID
     connection = get_db_connection()
     if not connection:
         return
@@ -99,12 +103,14 @@ def load_schedules_from_db():
             # Handle ramadan flag (can be int, str, or bool)
             ramadan_flag = schedule.get('ramadan', 0)
             is_ramadan = (str(ramadan_flag) == '1' or ramadan_flag == 1 or ramadan_flag is True)
-            
+
             if is_ramadan:
                 DEFAULT_SCHEDULES_RAMADAN[schedule['name']] = schedule_data
             else:
                 DEFAULT_SCHEDULES[schedule['name']] = schedule_data
-        
+
+            SCHEDULES_BY_ID[schedule['id']] = schedule_data
+
         cursor.close()
     except Error as e:
         print(f"Error loading schedules: {e}", file=sys.stderr)
@@ -261,6 +267,38 @@ def load_user_day_schedules_from_db():
         if connection.is_connected():
             connection.close()
 
+def load_user_schedule_periods_from_db():
+    """Load per-employee date-range schedule overrides from the database"""
+    global USER_SCHEDULE_PERIODS
+    connection = get_db_connection()
+    if not connection:
+        return
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT employee_code, schedule_id, start_date, end_date FROM user_schedule_periods")
+        rows = cursor.fetchall()
+        for row in rows:
+            code = str(row['employee_code'])
+            if code not in USER_SCHEDULE_PERIODS:
+                USER_SCHEDULE_PERIODS[code] = []
+            USER_SCHEDULE_PERIODS[code].append((row['start_date'], row['end_date'], row['schedule_id']))
+        cursor.close()
+    except Error as e:
+        print(f"Error loading user schedule periods: {e}", file=sys.stderr)
+    finally:
+        if connection.is_connected():
+            connection.close()
+
+def get_period_schedule(user_id, date_obj):
+    """Return the schedule dict for a per-employee date-range override, or None if none matches."""
+    if not date_obj:
+        return None
+    check_date = date_obj.date() if hasattr(date_obj, 'date') else date_obj
+    for start, end, schedule_id in USER_SCHEDULE_PERIODS.get(str(user_id), []):
+        if start <= check_date <= end:
+            return SCHEDULES_BY_ID.get(schedule_id)
+    return None
+
 def load_public_holidays_from_db():
     """Load public holidays from the database"""
     global PUBLIC_HOLIDAYS
@@ -294,6 +332,7 @@ def initialize_from_database():
     load_saturday_schedules_from_db()
     load_user_workdays_from_db()
     load_user_day_schedules_from_db()
+    load_user_schedule_periods_from_db()
     load_public_holidays_from_db()
 
 # Lists of device IDs for entries and exits
@@ -318,7 +357,13 @@ EXCLUDED_SPECIAL_RECORD_TYPES = {
 
 def get_user_schedule(user_id, date_obj=None):
     user_id_str = str(user_id)
-    
+
+    # 0. Per-employee date-range override takes priority over everything else
+    if date_obj:
+        period_schedule = get_period_schedule(user_id, date_obj)
+        if period_schedule:
+            return period_schedule
+
     # Check if date is in Ramadan period
     is_ramadan = is_ramadan_date(date_obj) if date_obj else False
     

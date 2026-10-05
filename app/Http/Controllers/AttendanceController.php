@@ -88,7 +88,8 @@ class AttendanceController extends Controller
         'end_date' => 'required|date|after_or_equal:start_date',
         'category' => 'nullable|string',
         'group_id' => 'nullable|string',
-        'person_id' => 'nullable|string',
+        'person_id' => 'nullable|array',
+        'person_id.*' => 'string',
     ]);
 
     // Use the submitted values and add time if needed
@@ -96,7 +97,7 @@ class AttendanceController extends Controller
     $endDate = $validated['end_date'] . ' 23:59:59';
     $category = $request->category;
     $groupId = $request->group_id;
-    $personId = $request->person_id;
+    $personIds = array_values(array_filter((array) $request->input('person_id', []), fn($v) => $v !== null && $v !== '' && $v !== 'all'));
 
     // Enforce category based on droit
     if ($userDroit == 0) {
@@ -121,7 +122,7 @@ class AttendanceController extends Controller
             $validated['start_date'],
             $validated['end_date'],
             $groupId,
-            $personId
+            $personIds
         );
         if ($cachedResult !== null) {
             $allColumns = [
@@ -149,7 +150,7 @@ class AttendanceController extends Controller
                 'end_date'        => $request->input('end_date'),
                 'category'        => $category,
                 'group_id'        => $groupId,
-                'person_id'       => $personId,
+                'person_id'       => $personIds,
                 'userDroit'       => $userDroit,
                 'persons'         => $this->loadPersonsByDroit($userDroit),
             ]);
@@ -167,29 +168,29 @@ class AttendanceController extends Controller
             $whereConditions .= " AND g.usrgruid = ?";
             $params[] = $groupId;
         }
-        
-        if ($personId && $personId !== '' && $personId !== 'all') {
-            $whereConditions .= " AND u.usrid = ?";
-            $params[] = $personId;
+
+        if (!empty($personIds)) {
+            $whereConditions .= " AND u.usrid IN (" . implode(',', array_fill(0, count($personIds), '?')) . ")";
+            $params = array_merge($params, $personIds);
         }
 
         // Build parameters for each part of the UNION query
         $modifiedPunchParams = [$startDate, $endDate];
         $leaveParams1 = [$startDate, $endDate];
         $leaveParams2 = [$startDate, $endDate];
-        
+
         if ($groupId && $groupId !== '' && $groupId !== 'all') {
             $modifiedPunchParams[] = $groupId;
             $leaveParams1[] = $groupId;
             $leaveParams2[] = $groupId;
         }
-        
-        if ($personId && $personId !== '' && $personId !== 'all') {
-            $modifiedPunchParams[] = $personId;
-            $leaveParams1[] = $personId;
-            $leaveParams2[] = $personId;
+
+        if (!empty($personIds)) {
+            $modifiedPunchParams = array_merge($modifiedPunchParams, $personIds);
+            $leaveParams1 = array_merge($leaveParams1, $personIds);
+            $leaveParams2 = array_merge($leaveParams2, $personIds);
         }
-        
+
         // Build all parameters array for the UNION query
         $allParams = array_merge(
             $params, // First query params
@@ -315,27 +316,27 @@ class AttendanceController extends Controller
         $whereConditions .= " AND g.usrgruid = ?";
         $params[] = $groupId;
     }
-    
-    if ($personId && $personId !== '' && $personId !== 'all') {
-        $whereConditions .= " AND u.usrid = ?";
-        $params[] = $personId;
+
+    if (!empty($personIds)) {
+        $whereConditions .= " AND u.usrid IN (" . implode(',', array_fill(0, count($personIds), '?')) . ")";
+        $params = array_merge($params, $personIds);
     }
 
     // Build parameters for each part of the doctorants UNION query
     $modifiedPunchParams = [$startDate, $endDate];
     $leaveParams1 = [$startDate, $endDate];
     $leaveParams2 = [$startDate, $endDate];
-    
+
     if ($groupId && $groupId !== '' && $groupId !== 'all') {
         $modifiedPunchParams[] = $groupId;
         $leaveParams1[] = $groupId;
         $leaveParams2[] = $groupId;
     }
-    
-    if ($personId && $personId !== '' && $personId !== 'all') {
-        $modifiedPunchParams[] = $personId;
-        $leaveParams1[] = $personId;
-        $leaveParams2[] = $personId;
+
+    if (!empty($personIds)) {
+        $modifiedPunchParams = array_merge($modifiedPunchParams, $personIds);
+        $leaveParams1 = array_merge($leaveParams1, $personIds);
+        $leaveParams2 = array_merge($leaveParams2, $personIds);
     }
 
     // Build all parameters array for the doctorants UNION query
@@ -431,9 +432,9 @@ class AttendanceController extends Controller
             $params[] = $groupId;
         }
 
-        if ($personId && $personId !== '' && $personId !== 'all') {
-            $whereConditions .= " AND u.usrid = ?";
-            $params[] = $personId;
+        if (!empty($personIds)) {
+            $whereConditions .= " AND u.usrid IN (" . implode(',', array_fill(0, count($personIds), '?')) . ")";
+            $params = array_merge($params, $personIds);
         }
 
         $modifiedPunchParams = [$startDate, $endDate];
@@ -446,10 +447,10 @@ class AttendanceController extends Controller
             $leaveParams2[] = $groupId;
         }
 
-        if ($personId && $personId !== '' && $personId !== 'all') {
-            $modifiedPunchParams[] = $personId;
-            $leaveParams1[] = $personId;
-            $leaveParams2[] = $personId;
+        if (!empty($personIds)) {
+            $modifiedPunchParams = array_merge($modifiedPunchParams, $personIds);
+            $leaveParams1 = array_merge($leaveParams1, $personIds);
+            $leaveParams2 = array_merge($leaveParams2, $personIds);
         }
 
         $allParams = array_merge($params, $modifiedPunchParams, $leaveParams1, $leaveParams2);
@@ -545,19 +546,19 @@ class AttendanceController extends Controller
         $whereConditions = "";
         $params = [$startDate, $endDate];
 
-        if ($personId && $personId !== '' && $personId !== 'all') {
-            $whereConditions .= " AND u.usrid = ?";
-            $params[] = $personId;
+        if (!empty($personIds)) {
+            $whereConditions .= " AND u.usrid IN (" . implode(',', array_fill(0, count($personIds), '?')) . ")";
+            $params = array_merge($params, $personIds);
         }
 
         $modifiedPunchParams = [$startDate, $endDate];
         $leaveParams1 = [$startDate, $endDate];
         $leaveParams2 = [$startDate, $endDate];
 
-        if ($personId && $personId !== '' && $personId !== 'all') {
-            $modifiedPunchParams[] = $personId;
-            $leaveParams1[] = $personId;
-            $leaveParams2[] = $personId;
+        if (!empty($personIds)) {
+            $modifiedPunchParams = array_merge($modifiedPunchParams, $personIds);
+            $leaveParams1 = array_merge($leaveParams1, $personIds);
+            $leaveParams2 = array_merge($leaveParams2, $personIds);
         }
 
         $allParams = array_merge($params, $modifiedPunchParams, $leaveParams1, $leaveParams2);
@@ -666,7 +667,7 @@ class AttendanceController extends Controller
         }, $results);
         
         // Build master employee list (all employees in the selected category/group/person, even zero-punch)
-        $allEmployees = $this->getEmployeeMasterList($category, $groupId ?? null, $personId ?? null);
+        $allEmployees = $this->getEmployeeMasterList($category, $groupId ?? null, $personIds ?? []);
         $publicHolidays = DB::table('public_holidays')
             ->pluck('holiday_name', 'holiday_date')
             ->mapWithKeys(fn($name, $date) => [(string) $date => $name])
@@ -857,7 +858,7 @@ class AttendanceController extends Controller
         'end_date' => $request->input('end_date'),
         'category' => $category,
         'group_id' => $groupId,
-        'person_id' => $personId,
+        'person_id' => $personIds,
         'userDroit' => $userDroit,
         'persons' => $this->loadPersonsByDroit($userDroit),
     ]);
@@ -872,7 +873,8 @@ class AttendanceController extends Controller
             'end_date' => 'required|date|after_or_equal:start_date',
             'category' => 'nullable|string',
             'group_id' => 'nullable|string',
-            'person_id' => 'nullable|string',
+            'person_id' => 'nullable|array',
+            'person_id.*' => 'string',
         ]);
 
         $sessionUser = Session::get('user');
@@ -1165,7 +1167,8 @@ public function downloadCumulativeData(Request $request)
         'end_date' => 'required|date|after_or_equal:start_date',
         'category' => 'nullable|string',
         'group_id' => 'nullable|string',
-        'person_id' => 'nullable|string',
+        'person_id' => 'nullable|array',
+        'person_id.*' => 'string',
     ]);
 
     // Fetch attendance data with filters
@@ -1345,7 +1348,7 @@ public function add_session()
         ]);
     }
 
-    private function getEmployeeMasterList(string $category, ?string $groupId, ?string $personId): array
+    private function getEmployeeMasterList(string $category, ?string $groupId, ?array $personIds = null): array
     {
         try {
             DB::statement("SET collation_connection = 'utf8_general_ci'");
@@ -1380,9 +1383,9 @@ public function add_session()
                 $extraConditions .= " AND g.usrgruid = ?";
                 $params[] = $groupId;
             }
-            if ($personId) {
-                $extraConditions .= " AND u.usrid = ?";
-                $params[] = $personId;
+            if (!empty($personIds)) {
+                $extraConditions .= " AND u.usrid IN (" . implode(',', array_fill(0, count($personIds), '?')) . ")";
+                $params = array_merge($params, $personIds);
             }
 
             $employees = DB::connection('biostar_tna')->select(
@@ -1684,7 +1687,8 @@ public function downloadCumulPersonnel(Request $request)
         'end_date'   => 'required|date|after_or_equal:start_date',
         'category'   => 'nullable|string',
         'group_id'   => 'nullable|string',
-        'person_id'  => 'nullable|string',
+        'person_id'  => 'nullable|array',
+        'person_id.*' => 'string',
     ]);
 
     // Re-use existing pipeline to get processed data
@@ -1839,7 +1843,7 @@ public function downloadCumulPersonnel(Request $request)
         string $startDate,
         string $endDate,
         ?string $groupId  = null,
-        ?string $personId = null
+        ?array $personIds = null
     ): ?array {
         // Group-filtered requests need a subset that isn't stored in the cache
         if ($groupId && $groupId !== '' && $groupId !== 'all') {
@@ -1874,8 +1878,8 @@ public function downloadCumulPersonnel(Request $request)
             ->where('category', $category)
             ->whereBetween('work_date', [$startDate, $endDate]);
 
-        if ($personId && $personId !== '' && $personId !== 'all') {
-            $query->where('employee_id', $personId);
+        if (!empty($personIds)) {
+            $query->whereIn('employee_id', $personIds);
         }
 
         $rows = $query->get(['row_json']);

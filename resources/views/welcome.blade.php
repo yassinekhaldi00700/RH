@@ -77,10 +77,9 @@
                     <div class="filter-item">
                         <label for="person_id">
                             <i class="fas fa-user"></i>
-                            Personne
+                            Personnes
                         </label>
-                        <select id="person_id" name="person_id" class="form-control select2-person">
-                            <option value="">Tous les employés</option>
+                        <select id="person_id" name="person_id[]" class="form-control select2-person" multiple>
                         </select>
                     </div>
 
@@ -501,7 +500,7 @@
 <!-- Person data from server (used to populate person dropdown by category) -->
 <script>
     var allPersonsData = @json($persons ?? []);
-    var preSelectedPersonId = '{{ old('person_id', $person_id ?? '') }}';
+    var preSelectedPersonIds = @json(old('person_id', $person_id ?? []));
     var preSelectedCategory = '{{ old('category', $category ?? '') }}';
 </script>
 
@@ -539,7 +538,7 @@
 
         // Initialize Select2 for person search
         $('.select2-person').select2({
-            placeholder: 'Rechercher un employé...',
+            placeholder: 'Tous les employés (ou choisir plusieurs)...',
             allowClear: true,
             language: {
                 noResults: function() { return 'Aucun résultat trouvé'; },
@@ -615,19 +614,18 @@
     // Populate person dropdown filtered by category
     function updatePersonDropdown(category) {
         var $select = $('#person_id');
-        var previousValue = $select.val();
-        $select.empty().append('<option value="">Tous les employés</option>');
+        var previousValues = $select.val() || [];
+        $select.empty();
         allPersonsData.forEach(function(p) {
             if (!category || p.category === category) {
                 $select.append('<option value="' + p.user_id + '">' + p.user_name + '</option>');
             }
         });
-        // Restore previous value if it still exists in the filtered list
-        if (previousValue && $select.find('option[value="' + previousValue + '"]').length) {
-            $select.val(previousValue);
-        } else {
-            $select.val('');
-        }
+        // Restore previously selected values that still exist in the filtered list
+        var stillValid = previousValues.filter(function(v) {
+            return $select.find('option[value="' + v + '"]').length > 0;
+        });
+        $select.val(stillValid);
         $select.trigger('change.select2');
     }
 
@@ -695,7 +693,7 @@
         var defaultCategory = $('#category').find('option:first').val();
         loadGroups();
         updatePersonDropdown(defaultCategory);
-        $('#person_id').val('').trigger('change.select2');
+        $('#person_id').val([]).trigger('change.select2');
     });
 
     // Function to restore selected values after page load
@@ -707,10 +705,10 @@
                 $('#group_id').val(selectedGroupId);
             }, 600);
         }
-        // Restore selected person (after updatePersonDropdown completes)
-        if (preSelectedPersonId) {
+        // Restore selected persons (after updatePersonDropdown completes)
+        if (preSelectedPersonIds && preSelectedPersonIds.length) {
             setTimeout(function() {
-                $('#person_id').val(preSelectedPersonId).trigger('change.select2');
+                $('#person_id').val(preSelectedPersonIds).trigger('change.select2');
             }, 100);
         }
     }

@@ -793,6 +793,14 @@
             </a>
         </li>
 
+        <!-- Nav Item - User Schedule Periods -->
+        <li class="nav-item">
+            <a class="nav-link" href="{{ route('admin.user-schedule-periods') }}">
+                <i class="fas fa-fw fa-calendar-plus"></i>
+                <span>Périodes Spéciales</span>
+            </a>
+        </li>
+
         <!-- Divider -->
         <hr class="sidebar-divider">
 
