@@ -32,6 +32,29 @@ class ScheduleManagementController extends Controller
         return null;
     }
 
+    /**
+     * All "Personnel" employees, including sub-groups (level 1 AND level 2 under
+     * usrgruid 1002) — matches the group filter AttendanceController uses for the
+     * 'personnel' category. The single-level version used to live inline here and
+     * silently excluded anyone in a level-2 sub-group from every employee picker.
+     */
+    private function fetchPersonnelEmployees(): array
+    {
+        return DB::connection('biostar_tna')->select("
+            SELECT u.NM as full_name, u.usrid as employee_code
+            FROM biostar2_ac.t_usr u
+            JOIN biostar2_ac.t_usrgr g ON u.usrgruid = g.usrgruid
+            WHERE g.usrgruid IN (
+                SELECT usrgruid FROM biostar2_ac.t_usrgr WHERE parentusrgruid = 1002
+                UNION
+                SELECT g2.usrgruid FROM biostar2_ac.t_usrgr g1
+                JOIN biostar2_ac.t_usrgr g2 ON g2.parentusrgruid = g1.usrgruid
+                WHERE g1.parentusrgruid = 1002
+            )
+            ORDER BY u.NM
+        ");
+    }
+
     // ==================== SCHEDULES ====================
     
     public function schedules(Request $request)
@@ -194,17 +217,7 @@ class ScheduleManagementController extends Controller
             ->get();
         
         // Fetch users from biostar2_ac database
-        $users = DB::connection('biostar_tna')->select("
-            SELECT u.NM as full_name, u.usrid as employee_code
-            FROM biostar2_ac.t_usr u
-            JOIN biostar2_ac.t_usrgr g ON u.usrgruid = g.usrgruid
-            WHERE g.usrgruid IN (
-                SELECT usrgruid
-                FROM biostar2_ac.t_usrgr
-                WHERE parentusrgruid = 1002
-            )
-            ORDER BY u.NM
-        ");
+        $users = $this->fetchPersonnelEmployees();
         
         return view('admin.user-schedules.create', compact('schedules', 'users', 'type'));
     }
@@ -334,17 +347,7 @@ class ScheduleManagementController extends Controller
         if ($redirect = $this->checkAdmin()) return $redirect;
         
         // Fetch users from biostar2_ac database
-        $users = DB::connection('biostar_tna')->select("
-            SELECT u.NM as full_name, u.usrid as employee_code
-            FROM biostar2_ac.t_usr u
-            JOIN biostar2_ac.t_usrgr g ON u.usrgruid = g.usrgruid
-            WHERE g.usrgruid IN (
-                SELECT usrgruid
-                FROM biostar2_ac.t_usrgr
-                WHERE parentusrgruid = 1002
-            )
-            ORDER BY u.NM
-        ");
+        $users = $this->fetchPersonnelEmployees();
         
         $schedules = DB::table('schedules')->orderBy('name')->get();
         return view('admin.saturday-schedules.create', compact('users', 'schedules'));
@@ -420,17 +423,7 @@ class ScheduleManagementController extends Controller
         }
         
         // Fetch users from biostar2_ac database
-        $users = DB::connection('biostar_tna')->select("
-            SELECT u.NM as full_name, u.usrid as employee_code
-            FROM biostar2_ac.t_usr u
-            JOIN biostar2_ac.t_usrgr g ON u.usrgruid = g.usrgruid
-            WHERE g.usrgruid IN (
-                SELECT usrgruid
-                FROM biostar2_ac.t_usrgr
-                WHERE parentusrgruid = 1002
-            )
-            ORDER BY u.NM
-        ");
+        $users = $this->fetchPersonnelEmployees();
         
         $schedules = DB::table('schedules')->orderBy('name')->get();
         return view('admin.saturday-schedules.edit', compact('saturdaySchedule', 'users', 'schedules'));
@@ -528,17 +521,7 @@ class ScheduleManagementController extends Controller
     {
         if ($redirect = $this->checkAdmin()) return $redirect;
         
-        $biostarUsers = DB::connection('biostar_tna')->select(" 
-            SELECT u.NM as full_name, u.usrid as employee_code
-            FROM biostar2_ac.t_usr u
-            JOIN biostar2_ac.t_usrgr g ON u.usrgruid = g.usrgruid
-            WHERE g.usrgruid IN (
-                SELECT usrgruid
-                FROM biostar2_ac.t_usrgr
-                WHERE parentusrgruid = 1002
-            )
-            ORDER BY u.NM
-        ");
+        $biostarUsers = $this->fetchPersonnelEmployees();
 
         $users = collect($biostarUsers)
             ->map(function ($user) {
@@ -838,17 +821,7 @@ class ScheduleManagementController extends Controller
         $type = $request->input('type', 'normal');
 
         $schedules = DB::table('schedules')->orderBy('name')->get();
-        $users = DB::connection('biostar_tna')->select("
-            SELECT u.NM as full_name, u.usrid as employee_code
-            FROM biostar2_ac.t_usr u
-            JOIN biostar2_ac.t_usrgr g ON u.usrgruid = g.usrgruid
-            WHERE g.usrgruid IN (
-                SELECT usrgruid
-                FROM biostar2_ac.t_usrgr
-                WHERE parentusrgruid = 1002
-            )
-            ORDER BY u.NM
-        ");
+        $users = $this->fetchPersonnelEmployees();
         $days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 
         return view('admin.user-day-schedules.create', compact('schedules', 'users', 'days', 'type'));
@@ -913,17 +886,7 @@ class ScheduleManagementController extends Controller
 
         $ramadanFlag = $daySchedule->ramadan;
         $schedules   = DB::table('schedules')->orderBy('name')->get();
-        $users = DB::connection('biostar_tna')->select("
-            SELECT u.NM as full_name, u.usrid as employee_code
-            FROM biostar2_ac.t_usr u
-            JOIN biostar2_ac.t_usrgr g ON u.usrgruid = g.usrgruid
-            WHERE g.usrgruid IN (
-                SELECT usrgruid
-                FROM biostar2_ac.t_usrgr
-                WHERE parentusrgruid = 1002
-            )
-            ORDER BY u.NM
-        ");
+        $users = $this->fetchPersonnelEmployees();
         $days        = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
         $type        = $ramadanFlag ? 'ramadan' : 'normal';
 
@@ -988,17 +951,7 @@ class ScheduleManagementController extends Controller
         if ($redirect = $this->checkAdmin()) return $redirect;
 
         $schedules = DB::table('schedules')->orderBy('name')->get();
-        $users = DB::connection('biostar_tna')->select("
-            SELECT u.NM as full_name, u.usrid as employee_code
-            FROM biostar2_ac.t_usr u
-            JOIN biostar2_ac.t_usrgr g ON u.usrgruid = g.usrgruid
-            WHERE g.usrgruid IN (
-                SELECT usrgruid
-                FROM biostar2_ac.t_usrgr
-                WHERE parentusrgruid = 1002
-            )
-            ORDER BY u.NM
-        ");
+        $users = $this->fetchPersonnelEmployees();
 
         return view('admin.user-schedule-periods.create', compact('schedules', 'users'));
     }
@@ -1050,17 +1003,7 @@ class ScheduleManagementController extends Controller
         }
 
         $schedules = DB::table('schedules')->orderBy('name')->get();
-        $users = DB::connection('biostar_tna')->select("
-            SELECT u.NM as full_name, u.usrid as employee_code
-            FROM biostar2_ac.t_usr u
-            JOIN biostar2_ac.t_usrgr g ON u.usrgruid = g.usrgruid
-            WHERE g.usrgruid IN (
-                SELECT usrgruid
-                FROM biostar2_ac.t_usrgr
-                WHERE parentusrgruid = 1002
-            )
-            ORDER BY u.NM
-        ");
+        $users = $this->fetchPersonnelEmployees();
 
         return view('admin.user-schedule-periods.edit', compact('period', 'schedules', 'users'));
     }
