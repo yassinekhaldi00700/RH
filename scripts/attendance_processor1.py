@@ -11,6 +11,10 @@ USER_WORKDAYS = {
     # Default is Monday-Friday [0,1,2,3,4] if not specified
 }
 
+# Morocco's government permanently dropped the +1h offset starting this date
+# (never reverts, unlike a Ramadan-style temporary shift).
+PERMANENT_TIME_CORRECTION_START = date(2026, 9, 20)
+
 PUBLIC_HOLIDAYS = {
     "2025-05-01": "Jour ferie",
     "2025-06-27": "Jour ferie",
@@ -27,8 +31,8 @@ def get_public_holiday_name(date_str):
     return PUBLIC_HOLIDAYS.get(date_str, "Jour ferie")
 
 # Lists of device IDs for entries and exits
-ENTRY_DEVICES = ['546271448', '546271459', '546271451', '546271441', '546271439', '546271457', 'PUNCH_TYPE_BREAK_END']
-EXIT_DEVICES = ['546271450', '546271456', '546271446', '546271465', '546271455', '546271449', 'PUNCH_TYPE_BREAK_START']
+ENTRY_DEVICES = ['546271448', '546271459', '546271451', '546271441', '546271439', '546271457', '544406591', '546211175', '544404098', '546211180', '544406595', '546210407', '544406713', 'PUNCH_TYPE_BREAK_END']
+EXIT_DEVICES = ['546271450', '546271456', '546271446', '546271465', '546271455', '546271449', '544406604', '546211165', '546211177', '546210421', '544406602', '544406099', '546211171', 'PUNCH_TYPE_BREAK_START']
 
 def convert_minutes_to_hms(minutes):
     """Convert minutes to HH:MM:SS format"""
@@ -120,7 +124,13 @@ def process_attendance_data(data):
 
     df = pd.DataFrame(data) if data else pd.DataFrame(columns=['srvdt', 'devuid', 'usrid', 'user_name', 'group_name', 'record_type'])
     df['srvdt'] = pd.to_datetime(df['srvdt'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
-    # df['srvdt'] = df['srvdt'] - pd.Timedelta(hours=1)  # Subtract 1 hour from all timestamps
+
+    # The SQL query adds +1h to every timestamp. The government permanently dropped
+    # that +1h starting PERMANENT_TIME_CORRECTION_START, so it must be subtracted
+    # back out for every row from that date onward (this never reverts).
+    permanent_mask = df['srvdt'].apply(lambda dt: pd.notna(dt) and dt.date() >= PERMANENT_TIME_CORRECTION_START)
+    df.loc[permanent_mask, 'srvdt'] = df.loc[permanent_mask, 'srvdt'] - pd.Timedelta(hours=1)
+
     df['Date'] = df['srvdt'].dt.date
     df['Time'] = df['srvdt'].dt.time
 

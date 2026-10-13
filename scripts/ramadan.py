@@ -27,6 +27,9 @@ USER_DAY_SCHEDULES = {}
 USER_DAY_SCHEDULES_RAMADAN = {}
 PUBLIC_HOLIDAYS = {}
 RAMADAN_PERIODS = []
+# Morocco's government permanently dropped the +1h offset starting this date
+# (unlike Ramadan, which is temporary and reverts, this never reverts).
+PERMANENT_TIME_CORRECTION_START = date(2026, 9, 20)
 # All schedules keyed by id, regardless of ramadan flag (used by USER_SCHEDULE_PERIODS)
 SCHEDULES_BY_ID = {}
 # Per-employee date-range schedule overrides: {employee_code: [(start_date, end_date, schedule_id), ...]}
@@ -336,8 +339,8 @@ def initialize_from_database():
     load_public_holidays_from_db()
 
 # Lists of device IDs for entries and exits
-ENTRY_DEVICES = ['546271448', '546271459', '546271451', '546271441', '546271439', '546271457', 'PUNCH_TYPE_BREAK_END']
-EXIT_DEVICES = ['546271450', '546271456', '546271446', '546271465', '546271455', '546271449', 'PUNCH_TYPE_BREAK_START']
+ENTRY_DEVICES = ['546271448', '546271459', '546271451', '546271441', '546271439', '546271457', '544406591', '546211175', '544404098', '546211180', '544406595', '546210407', '544406713', 'PUNCH_TYPE_BREAK_END']
+EXIT_DEVICES = ['546271450', '546271456', '546271446', '546271465', '546271455', '546271449', '544406604', '546211165', '546211177', '546210421', '544406602', '544406099', '546211171', 'PUNCH_TYPE_BREAK_START']
 
 # These leave types keep their attendance row, but must not show punch times or
 # contribute to delay/attendance totals.
@@ -651,9 +654,13 @@ def process_attendance_data(data):
     df['srvdt'] = pd.to_datetime(df['srvdt'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
 
     # During Ramadan, Morocco reverts to UTC+0, so the SQL +1h offset must be corrected.
-    # Subtract 1 hour only for rows whose timestamp falls within a Ramadan period.
+    # Subtract 1 hour for rows in a Ramadan period, AND permanently for every row from
+    # PERMANENT_TIME_CORRECTION_START onward (the government dropped the +1h for good
+    # starting 2026-09-20 — this never reverts, unlike the Ramadan-only case above).
     ramadan_mask = df['srvdt'].apply(lambda dt: is_ramadan_date(dt.date()) if pd.notna(dt) else False)
-    df.loc[ramadan_mask, 'srvdt'] = df.loc[ramadan_mask, 'srvdt'] - pd.Timedelta(hours=1)
+    permanent_mask = df['srvdt'].apply(lambda dt: pd.notna(dt) and dt.date() >= PERMANENT_TIME_CORRECTION_START)
+    correction_mask = ramadan_mask | permanent_mask
+    df.loc[correction_mask, 'srvdt'] = df.loc[correction_mask, 'srvdt'] - pd.Timedelta(hours=1)
 
     df['Date'] = df['srvdt'].dt.date
     df['Time'] = df['srvdt'].dt.time
