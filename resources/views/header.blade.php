@@ -801,6 +801,14 @@
             </a>
         </li>
 
+        <!-- Nav Item - Anomalie Notifications -->
+        <li class="nav-item">
+            <a class="nav-link" href="{{ route('admin.anomalie-notifications') }}">
+                <i class="fas fa-fw fa-envelope-open-text"></i>
+                <span>Notifications Anomalies</span>
+            </a>
+        </li>
+
         <!-- Divider -->
         <hr class="sidebar-divider">
 

@@ -95,6 +95,77 @@
                             <input type="date" id="end-date" name="end_date" class="form-control elegant-input" required value="{{ old('end_date', $end_date ?? '') }}">
                         </div>
                     </div>
+
+                    @php
+                        // Fixed, known Status values produced by the backend (ramadan.py / attendance_processor1.py),
+                        // so the dropdown is populated from page load — not only after a search has run.
+                        $fixedStatuses = [
+                            'normal' => 'Normal',
+                            'present' => 'Présent',
+                            'retard' => 'Retard',
+                            'sortie en avance' => 'Sortie en avance',
+                            'retard/sortie en avance' => 'Retard / Sortie en avance',
+                            'justifiée' => 'Justifiée',
+                            'partir' => 'Partir',
+                            'anomalie' => 'Anomalie',
+                            'Absent' => 'Absent',
+                            'Pas de travail' => 'Pas de travail',
+                        ];
+                        // Union in any value actually present in the current results, in case a future
+                        // status string isn't in the fixed list above yet.
+                        foreach (collect($attendanceData['processed_data'] ?? [])->pluck('Status')->filter(fn($v) => $v !== null && $v !== '')->unique() as $seenStatus) {
+                            if (!array_key_exists($seenStatus, $fixedStatuses)) {
+                                $fixedStatuses[$seenStatus] = $seenStatus;
+                            }
+                        }
+                        asort($fixedStatuses);
+
+                        // Fixed, known Exception "base" values (congés / absences types used across the app).
+                        // Exception can also be a comma-combined string (e.g. two delay reasons at once), so the
+                        // filter itself matches by "contains", not exact equality — see the JS below.
+                        $fixedExceptions = [
+                            'Congé annuel', 'Congé de maladie', 'Ordre de mission', 'Congé de maternité',
+                            'Congé sans solde', 'Congé de décès', 'Congé de mariage', 'Congé de circoncision',
+                            'Opération chirurgicale', 'Jour ferie',
+                            'Arriver en retard', 'Depart anticipe pour pause',
+                            'Retour en retard apres pause', 'Depart anticipe en fin de journee',
+                        ];
+                        foreach (collect($attendanceData['processed_data'] ?? [])->pluck('Exception')->filter(fn($v) => $v !== null && $v !== '')->unique() as $seenException) {
+                            if (!in_array($seenException, $fixedExceptions, true)) {
+                                $fixedExceptions[] = $seenException;
+                            }
+                        }
+                        sort($fixedExceptions);
+                    @endphp
+
+                    <!-- Status filter (client-side, filters the results table already on screen) -->
+                    <div class="filter-item">
+                        <label for="status_filter">
+                            <i class="fas fa-info-circle"></i>
+                            Statut
+                        </label>
+                        <select id="status_filter" name="status_filter" class="form-control elegant-select">
+                            <option value="">Tous les statuts</option>
+                            @foreach($fixedStatuses as $value => $label)
+                                <option value="{{ $value }}" {{ request('status_filter') === (string) $value ? 'selected' : '' }}>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <!-- Exception filter (client-side, filters the results table already on screen) -->
+                    <div class="filter-item">
+                        <label for="exception_filter">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            Exceptions
+                        </label>
+                        <select id="exception_filter" name="exception_filter" class="form-control elegant-select">
+                            <option value="">Toutes les exceptions</option>
+                            <option value="__none__" {{ request('exception_filter') === '__none__' ? 'selected' : '' }}>Aucune exception</option>
+                            @foreach($fixedExceptions as $exceptionValue)
+                                <option value="{{ $exceptionValue }}" {{ request('exception_filter') === $exceptionValue ? 'selected' : '' }}>{{ $exceptionValue }}</option>
+                            @endforeach
+                        </select>
+                    </div>
                 </div>
 
                 <!-- Action Buttons -->
@@ -291,6 +362,14 @@
                                 Heures Supp.
                             </label>
                         </div>
+                        <div class="elegant-checkbox special-category-hide" style="{{ in_array($category ?? '', ['complex', 'vacataire_emadu']) ? 'display: none;' : '' }}">
+                            <input type="checkbox" name="columns[]" id="col-heures_travaillees" value="heures_travaillees" {{ in_array('heures_travaillees', $selectedColumns ?? []) ? 'checked' : '' }}>
+                            <label for="col-heures_travaillees">
+                                <span class="checkmark"></span>
+                                <i class="fas fa-business-time text-info"></i>
+                                Heures Travaillées
+                            </label>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -307,7 +386,7 @@
             <h3><i class="fas fa-table"></i> Aperçu des Données</h3>
             <div class="results-info">
                 @if(isset($attendanceData['processed_data']))
-                    <span class="badge badge-primary">
+                    <span class="badge badge-primary" id="records-count-badge">
                         <i class="fas fa-database"></i>
                         {{ count($attendanceData['processed_data']) }} enregistrements
                     </span>
@@ -335,12 +414,13 @@
         @if(in_array('sum_r', $selectedColumns ?? [])) <th>SUM R</th> @endif
         @if(in_array('sum_gen', $selectedColumns ?? [])) <th>SUM GEN</th> @endif
         @if(in_array('hour_supp', $selectedColumns ?? [])) <th>Hour Supp</th> @endif
+        @if(in_array('heures_travaillees', $selectedColumns ?? [])) <th>Heures Travaillées</th> @endif
     </tr>
 </thead>
                         <tbody>
 @if(isset($attendanceData['processed_data']) && count($attendanceData['processed_data']) > 0)
     @foreach($attendanceData['processed_data'] as $record)
-        <tr class="record-row" data-record-id="{{ $loop->index }}">
+        <tr class="record-row" data-record-id="{{ $loop->index }}" data-status="{{ $record['Status'] ?? '' }}" data-exception="{{ $record['Exception'] ?? '' }}">
             @if(in_array('date', $selectedColumns ?? [])) <td>{{ $record['Date'] ?? '' }}</td> @endif
             @if(in_array('nom', $selectedColumns ?? [])) <td>{{ $record['Nom'] ?? '' }}</td> @endif
             @if(in_array('id_utilisateur', $selectedColumns ?? [])) <td>{{ $record['ID utilisateur'] ?? '' }}</td> @endif
@@ -357,6 +437,7 @@
             @if(in_array('sum_r', $selectedColumns ?? [])) <td>{{ $record['la somme Retard'] ?? '' }}</td> @endif
             @if(in_array('sum_gen', $selectedColumns ?? [])) <td>{{ $record['la somme du Retards General'] ?? '' }}</td> @endif
             @if(in_array('hour_supp', $selectedColumns ?? [])) <td>{{ $record['Heure Supp'] ?? '' }}</td> @endif
+            @if(in_array('heures_travaillees', $selectedColumns ?? [])) <td>{{ $record['Heures Travaillées'] ?? '' }}</td> @endif
 
             <!-- Hidden inputs remain unchanged -->
             <input type="hidden" class="record-e1" value="{{ $record['e1'] ?? '' }}">
@@ -532,6 +613,57 @@
             }
         });
 
+        // Statut / Exceptions filters. They're submitted along with the rest of the
+        // form (so the choice survives clicking "Rechercher" and a fresh page load),
+        // AND applied live client-side against the table already on screen when you
+        // change them without resubmitting.
+        $.fn.dataTable.ext.search.push(function (settings, searchData, index, rowData, counter) {
+            if (settings.nTable.id !== 'dataTable') return true;
+
+            var $row = $(table.row(index).node());
+            var statusWanted = $('#status_filter').val();
+            var exceptionWanted = $('#exception_filter').val();
+
+            if (statusWanted && $row.data('status') !== statusWanted) {
+                return false;
+            }
+
+            if (exceptionWanted) {
+                var rowException = ($row.data('exception') || '').toString();
+                if (exceptionWanted === '__none__') {
+                    if (rowException !== '') return false;
+                } else if (rowException.indexOf(exceptionWanted) === -1) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+
+        // Keep the "Aperçu des Données" badge (total record count) in sync with
+        // whatever Statut/Exception filtering is currently applied to the table.
+        var totalRecords = table.rows().count();
+        table.on('draw', function () {
+            var $badge = $('#records-count-badge');
+            if (!$badge.length) return;
+            var filteredCount = table.rows({ search: 'applied' }).count();
+            var label = filteredCount === totalRecords
+                ? filteredCount + ' enregistrements'
+                : filteredCount + ' / ' + totalRecords + ' enregistrements';
+            $badge.html('<i class="fas fa-database"></i> ' + label);
+        });
+
+        // The predicate above is registered AFTER the table's first (synchronous)
+        // draw, so if the page just reloaded with a Statut/Exception already chosen
+        // (via "Rechercher"), that first draw wasn't filtered yet — draw once more
+        // now so the table (and the badge above, via the "draw" handler) matches
+        // the selects immediately, no interaction needed.
+        table.draw();
+
+        $('#status_filter, #exception_filter').on('change', function () {
+            table.draw();
+        });
+
         // Load initial groups and persons by current category
         loadGroups();
         updatePersonDropdown($('#category').val() || 'personnel');
@@ -694,6 +826,10 @@
         loadGroups();
         updatePersonDropdown(defaultCategory);
         $('#person_id').val([]).trigger('change.select2');
+        $('#status_filter, #exception_filter').val('');
+        if ($.fn.dataTable.isDataTable('#dataTable')) {
+            $('#dataTable').DataTable().draw();
+        }
     });
 
     // Function to restore selected values after page load
@@ -720,7 +856,9 @@
             end_date: $('#end-date').val(),
             category: $('#category').val(),
             group_id: $('#group_id').val(),
-            person_id: $('#person_id').val()
+            person_id: $('#person_id').val(),
+            status_filter: $('#status_filter').val(),
+            exception_filter: $('#exception_filter').val()
         };
     }
 

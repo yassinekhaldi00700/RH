@@ -69,11 +69,21 @@ class AttendanceController extends Controller
             ['header' => 'SUM R', 'key' => 'la somme Retard'],
             ['header' => 'SUM GEN', 'key' => 'la somme du Retards General'],
             ['header' => 'Heure Supp', 'key' => 'Heure Supp'],
+            ['header' => 'Heures Travaillées', 'key' => 'Heures Travaillées'],
         ]);
     }
     
     public function getAttendanceData(Request $request)
     {
+        // This pipeline fetches raw BioStar punches (a 4-way UNION query) and
+        // spawns a Python subprocess to process them — cost scales with how many
+        // days x how many employees are requested. A large Rapport Cumulatif /
+        // Cumul Personnel range can exceed PHP's default 60s max_execution_time
+        // on hosts that don't override it. Raise it just for this request rather
+        // than relying on server-wide php.ini (which we don't control on every
+        // environment this runs on).
+        set_time_limit(300);
+
         // Check if user is logged in
         $user = Session::get('user');
         if (!$user) {
@@ -128,17 +138,17 @@ class AttendanceController extends Controller
             $allColumns = [
                 'date', 'nom', 'id_utilisateur', 'departement', 'status', 'exception',
                 'premier_entree', 'sortie_final', 'r1', 'sa1', 'r2', 'sa2',
-                'sum_sa', 'sum_r', 'sum_gen', 'hour_supp',
+                'sum_sa', 'sum_r', 'sum_gen', 'hour_supp', 'heures_travaillees',
             ];
 
             if (in_array($category, ['complex', 'vacataire_emadu'])) {
-                $allColumns = array_values(array_diff($allColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp']));
+                $allColumns = array_values(array_diff($allColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp', 'heures_travaillees']));
             }
 
             $selectedColumns = $request->input('columns', session('selected_columns', $allColumns));
 
             if (in_array($category, ['complex', 'vacataire_emadu'])) {
-                $selectedColumns = array_values(array_diff($selectedColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp']));
+                $selectedColumns = array_values(array_diff($selectedColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp', 'heures_travaillees']));
             }
 
             session(['selected_columns' => $selectedColumns]);
@@ -233,7 +243,8 @@ class AttendanceController extends Controller
                 544406591, 546211175, 544404098, 546211180,
                 544406595, 546210407, 544406713,
                 544406604, 546211165, 546211177, 546210421,
-                544406602, 544406099, 546211171
+                544406602, 544406099, 546211171,
+                546271436, 546271464
             )
             AND l.bsevtc = 4102
             AND l.devdt BETWEEN ? AND ?
@@ -370,7 +381,8 @@ class AttendanceController extends Controller
                 544406591, 546211175, 544404098, 546211180,
                 544406595, 546210407, 544406713,
                 544406604, 546211165, 546211177, 546210421,
-                544406602, 544406099, 546211171
+                544406602, 544406099, 546211171,
+                546271436, 546271464
             )
             AND l.bsevtc = 4102
             AND l.devdt BETWEEN ? AND ?
@@ -484,7 +496,8 @@ class AttendanceController extends Controller
                 544406591, 546211175, 544404098, 546211180,
                 544406595, 546210407, 544406713,
                 544406604, 546211165, 546211177, 546210421,
-                544406602, 544406099, 546211171
+                544406602, 544406099, 546211171,
+                546271436, 546271464
             )
             AND l.bsevtc = 4102
             AND l.devdt BETWEEN ? AND ?
@@ -598,7 +611,8 @@ class AttendanceController extends Controller
                 544406591, 546211175, 544404098, 546211180,
                 544406595, 546210407, 544406713,
                 544406604, 546211165, 546211177, 546210421,
-                544406602, 544406099, 546211171
+                544406602, 544406099, 546211171,
+                546271436, 546271464
             )
             AND l.bsevtc = 4102
             AND l.devdt BETWEEN ? AND ?
@@ -852,17 +866,17 @@ class AttendanceController extends Controller
         $allColumns = [
             'date', 'nom', 'id_utilisateur', 'departement', 'status', 'exception',
             'premier_entree', 'sortie_final', 'r1', 'sa1', 'r2', 'sa2',
-            'sum_sa', 'sum_r', 'sum_gen', 'hour_supp'
+            'sum_sa', 'sum_r', 'sum_gen', 'hour_supp', 'heures_travaillees'
         ];
 
         if (in_array($category, ['complex', 'vacataire_emadu'])) {
-            $allColumns = array_values(array_diff($allColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp']));
+            $allColumns = array_values(array_diff($allColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp', 'heures_travaillees']));
         }
 
         $selectedColumns = $request->input('columns', session('selected_columns', $allColumns));
         
         if (in_array($category, ['complex', 'vacataire_emadu'])) {
-            $selectedColumns = array_values(array_diff($selectedColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp']));
+            $selectedColumns = array_values(array_diff($selectedColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp', 'heures_travaillees']));
         }
 
         session(['selected_columns' => $selectedColumns]);
@@ -940,13 +954,21 @@ class AttendanceController extends Controller
         }
         
         $processed_data = $attendanceData['processed_data'];
-        
+
+        // Apply the same Statut/Exception filter the results table uses on screen,
+        // so the exported file matches whatever's currently filtered there.
+        $processed_data = $this->filterRowsByStatusException(
+            $processed_data,
+            $request->input('status_filter'),
+            $request->input('exception_filter')
+        );
+
         // Handle column selection if specified
         $selectedColumns = $request->input('columns', []);
         if (!empty($selectedColumns) && $request->input('type') === 'selected') {
             $processed_data = $this->filterDataByColumns($processed_data, $selectedColumns);
         }
-        
+
         // Choose export format (CSV or Excel)
         $format = $request->input('format', 'csv');
         
@@ -1124,6 +1146,40 @@ class AttendanceController extends Controller
         ]);
     }
 
+    /**
+     * Mirrors the welcome page's client-side Statut/Exception table filter
+     * (DataTables custom search predicate), so an export matches whatever the
+     * user currently has filtered on screen. Status is an exact match;
+     * Exception is a "contains" match since it can be a comma-combined string,
+     * and '__none__' means "rows with no exception".
+     */
+    private function filterRowsByStatusException(array $data, ?string $statusFilter, ?string $exceptionFilter): array
+    {
+        $statusFilter = $statusFilter !== null ? trim($statusFilter) : '';
+        $exceptionFilter = $exceptionFilter !== null ? trim($exceptionFilter) : '';
+
+        if ($statusFilter === '' && $exceptionFilter === '') {
+            return $data;
+        }
+
+        return array_values(array_filter($data, function ($record) use ($statusFilter, $exceptionFilter) {
+            if ($statusFilter !== '' && (string) ($record['Status'] ?? '') !== $statusFilter) {
+                return false;
+            }
+
+            if ($exceptionFilter !== '') {
+                $rowException = (string) ($record['Exception'] ?? '');
+                if ($exceptionFilter === '__none__') {
+                    if ($rowException !== '') return false;
+                } elseif (strpos($rowException, $exceptionFilter) === false) {
+                    return false;
+                }
+            }
+
+            return true;
+        }));
+    }
+
     private function filterDataByColumns($data, $selectedColumns)
     {
         if (empty($selectedColumns)) {
@@ -1153,6 +1209,8 @@ class AttendanceController extends Controller
             'sum_late' => 'la somme Retard',
             'sum_gen' => 'la somme du Retards General',
             'overtime' => 'Heure Supp',
+            'hour_supp' => 'Heure Supp',
+            'heures_travaillees' => 'Heures Travaillées',
             'e1' => 'e1',
             's1' => 's1',
             'e2' => 'e2',
@@ -1204,9 +1262,10 @@ public function downloadCumulativeData(Request $request)
 
     // Add headers
     $headers = [
-        'Nom', 'ID utilisateur', 'Departement', 'Period', 
-        'Total Jours Absents', 'Total Sortie en avance', 
-        'Total Retard', 'Total Retard General', 'Total Heures Supplementaires'
+        'Nom', 'ID utilisateur', 'Departement', 'Period',
+        'Total Jours Absents', 'Total Sortie en avance',
+        'Total Retard', 'Total Retard General', 'Total Heures Supplementaires',
+        'Total Heures Travaillees', 'Nombre Demi-Journees'
     ];
     fputcsv($output, $headers);
 
@@ -1222,6 +1281,8 @@ public function downloadCumulativeData(Request $request)
             $record['Total Retard'] ?? '',
             $record['Total Retard General'] ?? '',
             $record['Total Heures Supplementaires'] ?? '',
+            $record['Total Heures Travaillees'] ?? '',
+            $record['Nombre Demi-Journees'] ?? '',
         ];
         fputcsv($output, $row);
     }
@@ -1346,11 +1407,11 @@ public function add_session()
         $allColumns = [
             'date', 'nom', 'id_utilisateur', 'departement', 'status', 'exception',
             'premier_entree', 'sortie_final', 'r1', 'sa1', 'r2', 'sa2',
-            'sum_sa', 'sum_r', 'sum_gen', 'hour_supp'
+            'sum_sa', 'sum_r', 'sum_gen', 'hour_supp', 'heures_travaillees'
         ];
 
         if (in_array($category, ['complex', 'vacataire_emadu'])) {
-            $allColumns = array_values(array_diff($allColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp']));
+            $allColumns = array_values(array_diff($allColumns, ['r1', 'sa1', 'r2', 'sa2', 'sum_sa', 'sum_r', 'hour_supp', 'heures_travaillees']));
         }
 
         // Load persons from biostar DB based on user category
@@ -1652,6 +1713,7 @@ public function storeProfileAcAd(Request $request)
         'id_biostar' => 'required|integer',
         'nom'        => 'required|string|max:255',
         'categorie'  => 'required|in:AC,AD',
+        'email'      => 'nullable|email|max:255',
     ]);
 
     $existing = DB::table('personnel_categorie')
@@ -1667,6 +1729,7 @@ public function storeProfileAcAd(Request $request)
         'id_biostar' => $validated['id_biostar'],
         'nom'        => $validated['nom'],
         'categorie'  => $validated['categorie'],
+        'email'      => $validated['email'] ?? null,
         'created_at' => now(),
         'updated_at' => now(),
     ]);
@@ -1678,13 +1741,18 @@ public function updateProfileAcAd(Request $request, int $id)
 {
     $validated = $request->validate([
         'categorie' => 'required|in:AC,AD',
+        'email'     => 'nullable|email|max:255',
     ]);
 
     DB::table('personnel_categorie')
         ->where('id', $id)
-        ->update(['categorie' => $validated['categorie'], 'updated_at' => now()]);
+        ->update([
+            'categorie' => $validated['categorie'],
+            'email'     => $validated['email'] ?? null,
+            'updated_at' => now(),
+        ]);
 
-    return redirect()->route('admin.profile-acad')->with('success', 'Catégorie mise à jour.');
+    return redirect()->route('admin.profile-acad')->with('success', 'Profil mis à jour.');
 }
 
 public function destroyProfileAcAd(int $id)
@@ -1763,7 +1831,15 @@ public function downloadCumulPersonnel(Request $request)
             return 0;
         };
 
-        $cumulGlobalMin  = $parseMinutes($rec['Total Retard General'] ?? 0);
+        // 'Total Retard General' now excludes demi-journées (R1 exactly 4h, or
+        // SA2 4h+ — SA2 isn't capped, so a hit can remove more than 4h). This
+        // report's payroll conversion must stay exactly as before, so instead of
+        // trying to add back a variable amount, reconstruct the original total
+        // directly from 'Total Retard' + 'Total Sortie en avance' — both of those
+        // are always left fully untouched, so this is exact regardless of how
+        // much was removed from 'Total Retard General'.
+        $demiJournees    = (int) ($rec['Nombre Demi-Journees'] ?? 0);
+        $cumulGlobalMin  = $parseMinutes($rec['Total Retard'] ?? 0) + $parseMinutes($rec['Total Sortie en avance'] ?? 0);
         $heureSupMin     = $parseMinutes($rec['Total Heures Supplementaires'] ?? 0);
         $cumulJustifMin  = 0; // always 0 per spec
 
@@ -1796,7 +1872,8 @@ public function downloadCumulPersonnel(Request $request)
             $cumulConvertedDays,                     // 10 Cumul R/S non justifiés convertis en jours
             $absentsJours,                           // 11 Cumul jours absences non justifiés
             $total,                                  // 12 Total
-            '',                                      // 13 Observations
+            $demiJournees,                           // 13 Nombre Demi-Journées (info)
+            '',                                      // 14 Observations
         ];
     }
 
@@ -1822,6 +1899,7 @@ public function downloadCumulPersonnel(Request $request)
         'Cumul R/S non justifiés convertis en jours',
         'Cumul des jours d\'absences non justifiés',
         'Total',
+        'Nombre Demi-Journées',
         'Observations',
     ], ';');
 
@@ -1949,6 +2027,9 @@ public function downloadCumulPersonnel(Request $request)
                     'retard'        => 0,
                     'retard_gen'    => 0,
                     'heures_supp'   => 0,
+                    'heures_travaillees' => 0,
+                    'demi_journees' => 0,
+                    'demi_journees_seconds' => 0,
                 ];
             }
 
@@ -1963,10 +2044,31 @@ public function downloadCumulPersonnel(Request $request)
             $groups[$key]['retard']        += $this->hmsToSeconds($row['la somme Retard'] ?? '00:00:00');
             $groups[$key]['retard_gen']    += $this->hmsToSeconds($row['la somme du Retards General'] ?? '00:00:00');
             $groups[$key]['heures_supp']   += $this->hmsToSeconds($row['Heure Supp'] ?? '00:00:00');
+            $groups[$key]['heures_travaillees'] += $this->hmsToSeconds($row['Heures Travaillées'] ?? '00:00:00');
+
+            // "Demi-journée": R1 hits exactly its 4h cap, or SA2 reaches 4h+ (SA2
+            // isn't capped at the source, so it's a threshold, not an exact match —
+            // someone leaving 5h30 early still counts). R1 and SA2 count
+            // independently (same-day double-hit = 2), pulled out of retard_gen —
+            // R1 always removes exactly 4h (never more); SA2 removes its actual
+            // seconds (can be more) so the total stays fully "clean". 'Total
+            // Retard'/'Total Sortie en avance' stay untouched either way.
+            $r1Seconds  = $this->hmsToSeconds($row['Retard 1 '] ?? '00:00:00');
+            $sa2Seconds = $this->hmsToSeconds($row['Sortie en avance 2 '] ?? '00:00:00');
+
+            if ($r1Seconds === 4 * 3600) {
+                $groups[$key]['demi_journees']++;
+                $groups[$key]['demi_journees_seconds'] += $r1Seconds;
+            }
+            if ($sa2Seconds >= 4 * 3600) {
+                $groups[$key]['demi_journees']++;
+                $groups[$key]['demi_journees_seconds'] += $sa2Seconds;
+            }
         }
 
         $summary = [];
         foreach ($groups as $g) {
+            $retardGenClean = max(0, $g['retard_gen'] - $g['demi_journees_seconds']);
             $summary[] = [
                 'Nom'                           => $g['Nom'],
                 'ID utilisateur'                => $g['id'],
@@ -1975,8 +2077,10 @@ public function downloadCumulPersonnel(Request $request)
                 'Total Jours Absents'           => $g['absent'],
                 'Total Sortie en avance'        => $this->secondsToHms($g['sortie_avance']),
                 'Total Retard'                  => $this->secondsToHms($g['retard']),
-                'Total Retard General'          => $this->secondsToHms($g['retard_gen']),
+                'Total Retard General'          => $this->secondsToHms($retardGenClean),
                 'Total Heures Supplementaires'  => $this->secondsToHms($g['heures_supp']),
+                'Total Heures Travaillees'      => $this->secondsToHms($g['heures_travaillees']),
+                'Nombre Demi-Journees'          => $g['demi_journees'],
             ];
         }
 

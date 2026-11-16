@@ -19,6 +19,12 @@ class Kernel extends ConsoleKernel
         // After this runs, users requesting any range within the last 2 months
         // will be served instantly from the attendance_cache table.
         $schedule->command('attendance:precompute')->dailyAt('17:11');
+
+        // Anomalie notification emails: build the list in the morning, then send
+        // two hours later — the gap gives an admin a window to review/exclude
+        // people or pause sending entirely from the "Notifications Anomalies" page.
+        $schedule->command('anomalie:build')->weekdays()->at('07:00');
+        $schedule->command('anomalie:send')->weekdays()->at('09:00');
     }
 
     /**

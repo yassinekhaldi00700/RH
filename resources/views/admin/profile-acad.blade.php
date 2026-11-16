@@ -113,26 +113,34 @@
                         <tr>
                             <th>ID BioStar</th>
                             <th>Nom</th>
-                            <th style="width:160px">Catégorie</th>
+                            <th style="width:220px">Email</th>
+                            <th style="width:110px">Catégorie</th>
                             <th style="width:100px">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         @foreach($defined as $person)
+                        @php($updateFormId = 'update-form-' . $person->id)
                         <tr>
                             <td>{{ $person->id_biostar }}</td>
                             <td>{{ $person->nom }}</td>
                             <td>
-                                <form action="{{ route('admin.profile-acad.update', $person->id) }}" method="POST" class="d-flex align-items-center">
+                                <form id="{{ $updateFormId }}" action="{{ route('admin.profile-acad.update', $person->id) }}" method="POST">
                                     @csrf @method('PUT')
-                                    <select name="categorie" class="form-control form-control-sm mr-2">
+                                </form>
+                                <input type="email" name="email" form="{{ $updateFormId }}" class="form-control form-control-sm"
+                                       value="{{ $person->email }}" placeholder="email@ueuromed.org">
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <select name="categorie" form="{{ $updateFormId }}" class="form-control form-control-sm mr-2">
                                         <option value="AC" {{ $person->categorie === 'AC' ? 'selected' : '' }}>AC</option>
                                         <option value="AD" {{ $person->categorie === 'AD' ? 'selected' : '' }}>AD</option>
                                     </select>
-                                    <button type="submit" class="btn btn-sm btn-success" title="Enregistrer">
+                                    <button type="submit" form="{{ $updateFormId }}" class="btn btn-sm btn-success" title="Enregistrer">
                                         <i class="fas fa-save"></i>
                                     </button>
-                                </form>
+                                </div>
                             </td>
                             <td>
                                 <form action="{{ route('admin.profile-acad.destroy', $person->id) }}" method="POST"
@@ -220,6 +228,10 @@
                         <input type="text" name="nom" id="selectedNom" class="form-control" readonly required>
                     </div>
                     <div class="form-group">
+                        <label>Email <span class="text-muted">(optionnel)</span></label>
+                        <input type="email" name="email" class="form-control" placeholder="email@ueuromed.org">
+                    </div>
+                    <div class="form-group">
                         <label>Catégorie</label>
                         <select name="categorie" class="form-control" required>
                             <option value="">-- Sélectionner --</option>
@@ -252,6 +264,10 @@
                     <div class="form-group">
                         <label>Nom</label>
                         <input type="text" name="nom" id="defineNom" class="form-control" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label>Email <span class="text-muted">(optionnel)</span></label>
+                        <input type="email" name="email" id="defineEmail" class="form-control" placeholder="email@ueuromed.org">
                     </div>
                     <div class="form-group">
                         <label>Catégorie</label>
@@ -288,7 +304,7 @@ $(document).ready(function () {
         pageLength: 25,
         lengthMenu: [10, 25, 50, 100],
         order: [[1, 'asc']],
-        columnDefs: [{ orderable: false, targets: [2, 3] }],
+        columnDefs: [{ orderable: false, targets: [2, 3, 4] }],
         language: {
             url: '',
             search: 'Rechercher:',

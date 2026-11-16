@@ -1,5 +1,5 @@
 import pandas as pd
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, time
 import json
 import sys
 import mysql.connector
@@ -339,8 +339,8 @@ def initialize_from_database():
     load_public_holidays_from_db()
 
 # Lists of device IDs for entries and exits
-ENTRY_DEVICES = ['546271448', '546271459', '546271451', '546271441', '546271439', '546271457', '544406591', '546211175', '544404098', '546211180', '544406595', '546210407', '544406713', 'PUNCH_TYPE_BREAK_END']
-EXIT_DEVICES = ['546271450', '546271456', '546271446', '546271465', '546271455', '546271449', '544406604', '546211165', '546211177', '546210421', '544406602', '544406099', '546211171', 'PUNCH_TYPE_BREAK_START']
+ENTRY_DEVICES = ['546271448', '546271459', '546271451', '546271441', '546271439', '546271457', '544406591', '546211175', '544404098', '546211180', '544406595', '546210407', '544406713', '546271436', 'PUNCH_TYPE_BREAK_END']
+EXIT_DEVICES = ['546271450', '546271456', '546271446', '546271465', '546271455', '546271449', '544406604', '546211165', '546211177', '546210421', '544406602', '544406099', '546211171', '546271464', 'PUNCH_TYPE_BREAK_START']
 
 # These leave types keep their attendance row, but must not show punch times or
 # contribute to delay/attendance totals.
@@ -596,6 +596,70 @@ def calculate_heure_supp(entries, exits, schedule):
     
     return convert_minutes_to_hms(total_supp_minutes)
 
+def calculate_hours_worked(entries, exits, schedule):
+    """
+    Total time actually clocked in, summed across each entry/exit pair
+    (e1->s1, e2->s2, ...), minus whatever part of the schedule's lunch window
+    (LUNCH_START-LUNCH_END) that pair overlaps.
+
+    This single overlap rule covers every case without double-counting:
+      - Two separate pairs (badged out/in for lunch): each pair only touches
+        the lunch window at its boundary (zero-width overlap) -> nothing
+        extra subtracted, the gap between the pairs already excluded lunch.
+      - One pair that ends before lunch starts, or starts after lunch ends:
+        zero overlap -> nothing subtracted (e.g. 8:30-11:00, lunch 12:30-14:00
+        -> counts the full 2h30, they never reached lunch).
+      - One pair that only partially overlaps lunch (leaves mid-break, never
+        returns that day): subtract exactly the overlapping minutes (e.g.
+        8:30-13:15, lunch 12:30-14:00 -> subtract 12:30-13:15 = 45min).
+      - One pair spanning straight across lunch with no separate badge:
+        subtract the full configured lunch duration (e.g. 8:30-18:00, lunch
+        12:30-14:00 -> subtract the full 1h30).
+
+    Each pair is also clipped to the 06:00-00:00 window (a stray punch before
+    6am or after midnight doesn't count), matching the requested "from 6h
+    till 00:00" rule.
+    """
+    if not entries or not exits:
+        return "00:00:00"
+
+    base = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+    window_start_dt = datetime.combine(base.date(), time(6, 0, 0))
+    window_end_dt = datetime.combine(base.date(), time(0, 0, 0)) + timedelta(days=1)
+
+    lunch_start = datetime.strptime(schedule["LUNCH_START"], "%H:%M:%S").time()
+    lunch_end = datetime.strptime(schedule["LUNCH_END"], "%H:%M:%S").time()
+    lunch_start_dt = time_to_dt(lunch_start, schedule)
+    lunch_end_dt = time_to_dt(lunch_end, schedule)
+
+    total_minutes = 0
+    for i in range(min(len(entries), len(exits))):
+        if not entries[i] or not exits[i]:
+            continue
+
+        entry_dt = time_to_dt(entries[i], schedule)
+        exit_dt = time_to_dt(exits[i], schedule)
+
+        if exit_dt <= entry_dt:
+            continue
+
+        clipped_entry = max(entry_dt, window_start_dt)
+        clipped_exit = min(exit_dt, window_end_dt)
+
+        if clipped_exit <= clipped_entry:
+            continue
+
+        pair_minutes = (clipped_exit - clipped_entry).total_seconds() / 60
+
+        overlap_start = max(clipped_entry, lunch_start_dt)
+        overlap_end = min(clipped_exit, lunch_end_dt)
+        if overlap_end > overlap_start:
+            pair_minutes -= (overlap_end - overlap_start).total_seconds() / 60
+
+        total_minutes += max(0, pair_minutes)
+
+    return convert_minutes_to_hms(total_minutes)
+
 def filter_close_times(times, threshold_seconds=100):
     if not times:
         return []
@@ -684,13 +748,24 @@ def process_attendance_data(data):
     df['Date'] = pd.to_datetime(df['Date'])
    
     all_employees = df[['Name', 'UserID', 'Department']].drop_duplicates().to_dict('records') if not df.empty else []
-    min_date = df['Date'].min() if not df.empty else pd.NaT
-    max_date = df['Date'].max() if not df.empty else pd.NaT
-    # Use filter dates as fallback when there are no punch records in the period
-    if pd.isna(min_date) and filter_start_date:
+
+    # Prefer the explicitly requested range over the punch data's own min/max.
+    # A punch's effective Date can get reassigned outside the requested range
+    # (e.g. the midnight-crossover rule pushes an early-morning punch back one
+    # day), which would otherwise silently stretch all_workdays one day beyond
+    # what was asked for. That phantom extra day gets counted as "Absent" in
+    # the summary for every employee with no punch on it, while being invisible
+    # in the displayed table (which IS bounded to the requested range) — i.e.
+    # a summary absence count with nothing to show for it.
+    if filter_start_date:
         min_date = pd.to_datetime(filter_start_date)
-    if pd.isna(max_date) and filter_end_date:
+    else:
+        min_date = df['Date'].min() if not df.empty else pd.NaT
+    if filter_end_date:
         max_date = pd.to_datetime(filter_end_date)
+    else:
+        max_date = df['Date'].max() if not df.empty else pd.NaT
+
     if pd.isna(min_date) or pd.isna(max_date):
         return {"processed_data": [], "summary_data": []}
     all_workdays = get_date_range(min_date, max_date)
@@ -739,8 +814,9 @@ def process_attendance_data(data):
                 'la somme Retard': "00:00:00",
                 'la somme du Retards General': "00:00:00",
                 'Heure Supp': "00:00:00",
+                'Heures Travaillées': "00:00:00",
             }
-            
+
             for i in range(1, 5):
                 record[f'e{i}'] = None
                 record[f's{i}'] = None
@@ -825,6 +901,7 @@ def process_attendance_data(data):
             sum_retard = 0
             sum_retard_general = 0
             heure_supp = "00:00:00"
+            heures_travaillees = "00:00:00"
 
         elif special_record_type:
             # Convert the times to strings for comparison
@@ -855,6 +932,7 @@ def process_attendance_data(data):
                 sum_retard = 0
                 sum_retard_general = 0
                 heure_supp = "00:00:00"
+                heures_travaillees = "00:00:00"
             else:
                 # Original logic for other special record types
                 status = "partir"
@@ -910,9 +988,37 @@ def process_attendance_data(data):
                                 exits_s2_dt = datetime.combine(datetime.today(), exits['s2'])
                                 delta2 = (workday_end_dt - exits_s2_dt).total_seconds() / 60
                                 diff_sortie_final += max(0, delta2)
-                            
-                            
-                if num_entries == 2 and num_exits == 2: 
+
+                if num_entries == 4 and num_exits == 4:
+                    # 3rd gap (s3 -> e4), same classification pattern as the
+                    # s2/e3 gap above: a gap near lunch adds to SA1, a gap in
+                    # the afternoon/evening work window adds to SA2 (SA2 isn't
+                    # capped, so it can accumulate across gaps), and a late
+                    # return edge adds to R2. Unlike the s2/e3 catch-all above
+                    # (which still uses a hardcoded 18:00), this uses the
+                    # employee's real WORKDAY_END.
+                    morning_start = datetime.strptime(user_schedule["MORNING_START"], "%H:%M:%S").time()
+                    custom_morning_start = (datetime.combine(datetime.today(), morning_start) - timedelta(minutes=30)).time()
+                    lunch_threshold = datetime.strptime(user_schedule["LUNCH_THRESHOLD"], "%H:%M:%S").time()
+                    afternoon_threshold = datetime.strptime(user_schedule["AFTERNOON_THRESHOLD"], "%H:%M:%S").time()
+                    evening_threshold = datetime.strptime(user_schedule["EVENING_THRESHOLD"], "%H:%M:%S").time()
+
+                    if exits['s3'] and entries['e4']:
+                        if (afternoon_threshold <= exits['s3'] <= evening_threshold) and (afternoon_threshold <= entries['e4'] <= evening_threshold):
+                            delta3 = (datetime.combine(datetime.today(), entries['e4']) - datetime.combine(datetime.today(), exits['s3'])).total_seconds() / 60
+                            diff_sortie_final += max(0, delta3)
+                        elif (exits['s3'] <= afternoon_threshold) and (afternoon_threshold <= entries['e4'] <= evening_threshold):
+                            diff_entrer_apres_pause = calculate_afternoon_delay(entries['e4'], user_schedule) if entries['e4'] else 0
+                        elif (custom_morning_start <= exits['s3'] <= lunch_threshold) and (custom_morning_start <= entries['e4'] <= lunch_threshold):
+                            delta3 = (datetime.combine(datetime.today(), entries['e4']) - datetime.combine(datetime.today(), exits['s3'])).total_seconds() / 60
+                            diff_sortie_final += max(0, delta3)
+                        elif (afternoon_threshold <= exits['s3'] <= evening_threshold):
+                            workday_end_dt = datetime.combine(datetime.today(), datetime.strptime(user_schedule["WORKDAY_END"], "%H:%M:%S").time())
+                            exits_s3_dt = datetime.combine(datetime.today(), exits['s3'])
+                            delta3 = (workday_end_dt - exits_s3_dt).total_seconds() / 60
+                            diff_sortie_final += max(0, delta3)
+
+                if num_entries == 2 and num_exits == 2:
                     # Get schedule thresholds
                     morning_start = datetime.strptime(user_schedule["MORNING_START"], "%H:%M:%S").time()
                     custom_morning_start = (datetime.combine(datetime.today(), morning_start) - timedelta(minutes=30)).time()
@@ -983,6 +1089,7 @@ def process_attendance_data(data):
                 all_entries = [entries[f'e{i}'] for i in range(1, 5) if entries[f'e{i}']]
                 all_exits = [exits[f's{i}'] for i in range(1, 5) if exits[f's{i}']]
                 heure_supp = calculate_heure_supp(all_entries, all_exits, user_schedule)
+                heures_travaillees = calculate_hours_worked(all_entries, all_exits, user_schedule)
             
         elif is_weekend_day:
             status = "Pas de travail"
@@ -995,6 +1102,7 @@ def process_attendance_data(data):
             sum_retard = 0
             sum_retard_general = 0
             heure_supp = "00:00:00"
+            heures_travaillees = "00:00:00"
         
         else:
             
@@ -1008,6 +1116,7 @@ def process_attendance_data(data):
                 sum_retard = 0
                 sum_retard_general = 0
                 heure_supp = "00:00:00"
+                heures_travaillees = "00:00:00"
             else:
                 if status == "present":
                     if premier_entrie is None:
@@ -1066,9 +1175,37 @@ def process_attendance_data(data):
                             exits_s2_dt = datetime.combine(datetime.today(), exits['s2'])
                             delta2 = (workday_end_dt - exits_s2_dt).total_seconds() / 60
                             diff_sortie_final += max(0, delta2)
-                        
 
-                if num_entries == 2 and num_exits == 2: 
+                if num_entries == 4 and num_exits == 4:
+                    # 3rd gap (s3 -> e4), same classification pattern as the
+                    # s2/e3 gap above: a gap near lunch adds to SA1, a gap in
+                    # the afternoon/evening work window adds to SA2 (SA2 isn't
+                    # capped, so it can accumulate across gaps), and a late
+                    # return edge adds to R2. Unlike the s2/e3 catch-all above
+                    # (which still uses a hardcoded 18:00), this uses the
+                    # employee's real WORKDAY_END.
+                    morning_start = datetime.strptime(user_schedule["MORNING_START"], "%H:%M:%S").time()
+                    custom_morning_start = (datetime.combine(datetime.today(), morning_start) - timedelta(minutes=30)).time()
+                    lunch_threshold = datetime.strptime(user_schedule["LUNCH_THRESHOLD"], "%H:%M:%S").time()
+                    afternoon_threshold = datetime.strptime(user_schedule["AFTERNOON_THRESHOLD"], "%H:%M:%S").time()
+                    evening_threshold = datetime.strptime(user_schedule["EVENING_THRESHOLD"], "%H:%M:%S").time()
+
+                    if exits['s3'] and entries['e4']:
+                        if (afternoon_threshold <= exits['s3'] <= evening_threshold) and (afternoon_threshold <= entries['e4'] <= evening_threshold):
+                            delta3 = (datetime.combine(datetime.today(), entries['e4']) - datetime.combine(datetime.today(), exits['s3'])).total_seconds() / 60
+                            diff_sortie_final += max(0, delta3)
+                        elif (exits['s3'] <= afternoon_threshold) and (afternoon_threshold <= entries['e4'] <= evening_threshold):
+                            diff_entrer_apres_pause = calculate_afternoon_delay(entries['e4'], user_schedule) if entries['e4'] else 0
+                        elif (custom_morning_start <= exits['s3'] <= lunch_threshold) and (custom_morning_start <= entries['e4'] <= lunch_threshold):
+                            delta3 = (datetime.combine(datetime.today(), entries['e4']) - datetime.combine(datetime.today(), exits['s3'])).total_seconds() / 60
+                            diff_sortie_final += max(0, delta3)
+                        elif (afternoon_threshold <= exits['s3'] <= evening_threshold):
+                            workday_end_dt = datetime.combine(datetime.today(), datetime.strptime(user_schedule["WORKDAY_END"], "%H:%M:%S").time())
+                            exits_s3_dt = datetime.combine(datetime.today(), exits['s3'])
+                            delta3 = (workday_end_dt - exits_s3_dt).total_seconds() / 60
+                            diff_sortie_final += max(0, delta3)
+
+                if num_entries == 2 and num_exits == 2:
                     # Get schedule thresholds
                     morning_start = datetime.strptime(user_schedule["MORNING_START"], "%H:%M:%S").time()
                     custom_morning_start = (datetime.combine(datetime.today(), morning_start) - timedelta(minutes=30)).time()
@@ -1137,10 +1274,12 @@ def process_attendance_data(data):
 
             if status == "anomalie":
                 heure_supp = "00:00:00"
+                heures_travaillees = "00:00:00"
             else:
                 all_entries = [entries[f'e{i}'] for i in range(1, 5) if entries[f'e{i}']]
                 all_exits = [exits[f's{i}'] for i in range(1, 5) if exits[f's{i}']]
                 heure_supp = calculate_heure_supp(all_entries, all_exits, user_schedule)
+                heures_travaillees = calculate_hours_worked(all_entries, all_exits, user_schedule)
        
 
         # Reclassify "present" into sub-categories; rename "partir" to "justifiée"
@@ -1176,6 +1315,7 @@ def process_attendance_data(data):
             'la somme Retard': convert_minutes_to_hms(sum_retard),
             'la somme du Retards General': convert_minutes_to_hms(min(sum_retard_general, 480)),
             'Heure Supp': heure_supp,
+            'Heures Travaillées': heures_travaillees,
         }
        
         for i in range(1, 5):
@@ -1225,8 +1365,9 @@ def process_attendance_data(data):
                     'la somme Retard': "00:00:00",
                     'la somme du Retards General': "00:00:00",
                     'Heure Supp': "00:00:00",
+                    'Heures Travaillées': "00:00:00",
                 }
-               
+
                 for i in range(1, 5):
                     absence_record[f'e{i}'] = None
                     absence_record[f's{i}'] = None
@@ -1272,7 +1413,25 @@ def generate_summary_report(df):
         Retard = sum(time_to_minutes(x) for x in weekday_records['la somme Retard'])
         total_retard = sum(time_to_minutes(x) for x in weekday_records['la somme du Retards General'])
         total_heures_supp = sum(time_to_minutes(x) for x in weekday_records['Heure Supp'])
-       
+        total_heures_travaillees = sum(time_to_minutes(x) for x in weekday_records['Heures Travaillées'])
+
+        # "Demi-journée" days: R1 hits exactly its 4h (240min) cap, or SA2 reaches
+        # 4h or more (SA2 isn't capped at the source, so it's a threshold here, not
+        # an exact match — someone leaving 5h30 early still counts). Each hit (R1
+        # and SA2 count independently, so a same-day double-hit is 2) is pulled out
+        # of "Total Retard General" — "Total Retard" and "Total Sortie en avance"
+        # are left untouched. R1 always removes exactly 240 (it's never more); SA2
+        # removes its actual minutes (can be more than 240) so the total stays
+        # fully "clean" rather than partially.
+        r1_minutes = weekday_records['Retard 1 '].apply(time_to_minutes)
+        sa2_minutes = weekday_records['Sortie en avance 2 '].apply(time_to_minutes)
+        r1_demi_mask = r1_minutes == 240
+        sa2_demi_mask = sa2_minutes >= 240
+
+        demi_journee_count = int(r1_demi_mask.sum()) + int(sa2_demi_mask.sum())
+        demi_journee_minutes = r1_minutes[r1_demi_mask].sum() + sa2_minutes[sa2_demi_mask].sum()
+        total_retard = max(0, total_retard - demi_journee_minutes)
+
         absent_days = len(weekday_records[
             (weekday_records['Status'] == 'Absent') &
             (~weekday_records['Date'].astype(str).isin(PUBLIC_HOLIDAYS.keys()))
@@ -1294,7 +1453,9 @@ def generate_summary_report(df):
             'Total Sortie en avance': convert_minutes_to_hms(sortie_en_avnce),
             'Total Retard': convert_minutes_to_hms(Retard),
             'Total Retard General': convert_minutes_to_hms(total_retard),
-            'Total Heures Supplementaires': convert_minutes_to_hms(total_heures_supp)
+            'Total Heures Supplementaires': convert_minutes_to_hms(total_heures_supp),
+            'Total Heures Travaillees': convert_minutes_to_hms(total_heures_travaillees),
+            'Nombre Demi-Journees': demi_journee_count
         })
    
     return pd.DataFrame(summary_data)

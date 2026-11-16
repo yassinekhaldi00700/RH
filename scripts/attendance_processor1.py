@@ -31,8 +31,8 @@ def get_public_holiday_name(date_str):
     return PUBLIC_HOLIDAYS.get(date_str, "Jour ferie")
 
 # Lists of device IDs for entries and exits
-ENTRY_DEVICES = ['546271448', '546271459', '546271451', '546271441', '546271439', '546271457', '544406591', '546211175', '544404098', '546211180', '544406595', '546210407', '544406713', 'PUNCH_TYPE_BREAK_END']
-EXIT_DEVICES = ['546271450', '546271456', '546271446', '546271465', '546271455', '546271449', '544406604', '546211165', '546211177', '546210421', '544406602', '544406099', '546211171', 'PUNCH_TYPE_BREAK_START']
+ENTRY_DEVICES = ['546271448', '546271459', '546271451', '546271441', '546271439', '546271457', '544406591', '546211175', '544404098', '546211180', '544406595', '546210407', '544406713', '546271436','PUNCH_TYPE_BREAK_END']
+EXIT_DEVICES = ['546271450', '546271456', '546271446', '546271465', '546271455', '546271449', '544406604', '546211165', '546211177', '546210421', '544406602', '544406099', '546211171', '546271464','PUNCH_TYPE_BREAK_START']
 
 def convert_minutes_to_hms(minutes):
     """Convert minutes to HH:MM:SS format"""
@@ -153,13 +153,22 @@ def process_attendance_data(data):
     df['Date'] = pd.to_datetime(df['Date'])
    
     all_employees = df[['Name', 'UserID', 'Department']].drop_duplicates().to_dict('records') if not df.empty else []
-    min_date = df['Date'].min() if not df.empty else pd.NaT
-    max_date = df['Date'].max() if not df.empty else pd.NaT
-    # Use filter dates as fallback when there are no punch records in the period
-    if pd.isna(min_date) and filter_start_date:
+
+    # Prefer the explicitly requested range over the punch data's own min/max —
+    # see the matching fix/comment in scripts/ramadan.py for why: a punch's
+    # effective Date can land outside the requested range (e.g. a midnight-
+    # crossover reassignment), which would otherwise silently stretch
+    # all_workdays and count a phantom "Absent" day for employees with
+    # nothing to show for it in the displayed (range-trimmed) table.
+    if filter_start_date:
         min_date = pd.to_datetime(filter_start_date)
-    if pd.isna(max_date) and filter_end_date:
+    else:
+        min_date = df['Date'].min() if not df.empty else pd.NaT
+    if filter_end_date:
         max_date = pd.to_datetime(filter_end_date)
+    else:
+        max_date = df['Date'].max() if not df.empty else pd.NaT
+
     if pd.isna(min_date) or pd.isna(max_date):
         return json.dumps({"processed_data": [], "summary_data": []})
     all_workdays = get_date_range(min_date, max_date)

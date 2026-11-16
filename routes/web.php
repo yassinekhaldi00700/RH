@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\ScheduleManagementController;
+use App\Http\Controllers\AnomalieNotificationController;
 
 
 
@@ -111,6 +112,13 @@ Route::middleware(['checklogin'])->group(function () {
         Route::post('/profile-acad', [AttendanceController::class, 'storeProfileAcAd'])->name('profile-acad.store');
         Route::put('/profile-acad/{id}', [AttendanceController::class, 'updateProfileAcAd'])->name('profile-acad.update');
         Route::delete('/profile-acad/{id}', [AttendanceController::class, 'destroyProfileAcAd'])->name('profile-acad.destroy');
+
+        // Anomalie notification emails
+        Route::get('/anomalie-notifications', [AnomalieNotificationController::class, 'index'])->name('anomalie-notifications');
+        Route::post('/anomalie-notifications/build', [AnomalieNotificationController::class, 'buildNow'])->name('anomalie-notifications.build');
+        Route::post('/anomalie-notifications/toggle', [AnomalieNotificationController::class, 'toggleSetting'])->name('anomalie-notifications.toggle');
+        Route::post('/anomalie-notifications/selection', [AnomalieNotificationController::class, 'updateSelection'])->name('anomalie-notifications.selection');
+        Route::post('/anomalie-notifications/send', [AnomalieNotificationController::class, 'sendNow'])->name('anomalie-notifications.send');
 
         // Roles & droits (super admin: role admin + droit 0)
         Route::get('/roles', [ScheduleManagementController::class, 'roles'])->name('roles');
